@@ -218,12 +218,12 @@ function parseMoney(value: unknown, max: number, ctx: z.RefinementCtx): string {
 }
 
 /** A required amount (string or number in, normalised decimal string out). */
-function moneySchema(max: number) {
+export function moneySchema(max: number) {
   return z.unknown().transform((value, ctx) => parseMoney(value, max, ctx));
 }
 
 /** An optional amount: blank values become undefined. */
-function optionalMoneySchema(max: number) {
+export function optionalMoneySchema(max: number) {
   return z
     .unknown()
     .transform((value, ctx) =>
@@ -272,7 +272,10 @@ export const reasonSchema = z
   .min(3, { error: 'validation.reason.required' })
   .max(500, { error: 'validation.text.tooLong' });
 
-/** Fields a merchant fills in. Merchants never set the delivery fee or the owner. */
+/**
+ * Fields a merchant fills in. Merchants never set the delivery fee or the owner: the server
+ * prices the route (and, when given, checks the quote the merchant saw).
+ */
 export const createShipmentSchema = z.object({
   recipientName: z
     .string({ error: 'validation.required' })
@@ -281,8 +284,13 @@ export const createShipmentSchema = z.object({
     .max(120, { error: 'validation.name.tooLong' }),
   recipientPhone: shipmentPhoneSchema,
   recipientPhoneAlt: optionalPhone,
-  governorate: z.enum(GOVERNORATES, { error: 'validation.governorate.invalid' }),
-  city: text(80),
+  destinationZoneId: z.uuid({ error: 'validation.zone.required' }),
+  /** Defaults to the merchant's pickup zone. */
+  originZoneId: z.uuid({ error: 'validation.zone.required' }).optional(),
+  /** The quote shown to the merchant; rejected if expired, used or no longer accurate. */
+  quoteId: z.uuid({ error: 'validation.quote.invalid' }).optional(),
+  /** Optional locality detail; defaults to the destination zone name. */
+  city: optionalText(80),
   addressLine: text(300),
   landmark: optionalText(200),
   recipientNotes: optionalText(500),
@@ -291,11 +299,29 @@ export const createShipmentSchema = z.object({
 });
 export type CreateShipmentInput = z.infer<typeof createShipmentSchema>;
 
-/** Staff create shipments on behalf of an existing merchant and may set the delivery fee. */
-export const adminCreateShipmentSchema = createShipmentSchema.extend({
-  merchantId: z.uuid({ error: 'validation.merchant.required' }),
-  deliveryFee: optionalMoneySchema(MAX_DELIVERY_FEE),
-});
+/**
+ * Staff create shipments on behalf of an existing merchant. The fee is priced automatically; a
+ * manual fee is an override and needs a reason.
+ */
+export const adminCreateShipmentSchema = createShipmentSchema
+  .omit({ quoteId: true })
+  .extend({
+    merchantId: z.uuid({ error: 'validation.merchant.required' }),
+    manualFee: optionalMoneySchema(MAX_DELIVERY_FEE),
+    manualFeeReason: optionalText(500),
+  })
+  .superRefine((input, ctx) => {
+    if (
+      input.manualFee !== undefined &&
+      (!input.manualFeeReason || input.manualFeeReason.length < 3)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['manualFeeReason'],
+        message: 'validation.reason.required',
+      });
+    }
+  });
 export type AdminCreateShipmentInput = z.infer<typeof adminCreateShipmentSchema>;
 
 export const assignDriverSchema = z.object({

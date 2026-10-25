@@ -14,7 +14,12 @@ export function toAuthUser(user: UserWithProfile): AuthUser {
     status: user.status,
     emailVerified: user.emailVerifiedAt !== null,
     language: user.language,
-    merchant: user.merchantProfile ? { businessName: user.merchantProfile.businessName } : null,
+    merchant: user.merchantProfile
+      ? {
+          businessName: user.merchantProfile.businessName,
+          pickupZoneId: user.merchantProfile.defaultPickupZoneId,
+        }
+      : null,
   };
 }
 

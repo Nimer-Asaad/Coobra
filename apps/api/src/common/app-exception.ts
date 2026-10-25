@@ -95,4 +95,39 @@ export const Errors = {
       'SHIPMENT_COD_MISMATCH',
       'Collected amount does not match the expected cash on delivery',
     ),
+  pricingUnavailable: () =>
+    new AppException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'PRICING_UNAVAILABLE',
+      'No pricing rule applies to this route; an administrator must configure one',
+    ),
+  priceChanged: () =>
+    new AppException(
+      HttpStatus.CONFLICT,
+      'PRICE_CHANGED',
+      'The price for this route changed since the quote; request a new quote',
+    ),
+  quoteInvalid: () =>
+    new AppException(
+      HttpStatus.CONFLICT,
+      'QUOTE_INVALID',
+      'The quote is expired, already used or does not match this shipment',
+    ),
+  zoneInvalid: () =>
+    new AppException(HttpStatus.UNPROCESSABLE_ENTITY, 'ZONE_INVALID', 'Zone does not exist'),
+  zoneInactive: () =>
+    new AppException(HttpStatus.UNPROCESSABLE_ENTITY, 'ZONE_INACTIVE', 'Zone is not active'),
+  originZoneRequired: () =>
+    new AppException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'ORIGIN_ZONE_REQUIRED',
+      'No pickup zone: set the merchant pickup zone or choose an origin zone',
+    ),
+  feeOverrideNotAllowed: () =>
+    new AppException(
+      HttpStatus.CONFLICT,
+      'FEE_OVERRIDE_NOT_ALLOWED',
+      'The fee can no longer be changed directly in the current shipment status',
+    ),
+  conflict: (message: string) => new AppException(HttpStatus.CONFLICT, 'CONFLICT', message),
 };

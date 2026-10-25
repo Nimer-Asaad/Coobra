@@ -315,6 +315,16 @@ export const en = {
     driver: { required: 'Choose a driver.' },
     cod: { confirmRequired: 'Confirm whether cash was collected.' },
     status: { invalid: 'Unknown status.' },
+    zone: {
+      required: 'Choose a zone.',
+      code: 'Use capital letters, digits and underscores (e.g. NABLUS_CITY).',
+      codeTaken: 'This code is already used.',
+      kind: 'Choose a zone level.',
+      parent: 'Choose a valid parent zone.',
+    },
+    quote: { invalid: 'This price quote is not valid.' },
+    pricing: { fallbackZones: 'A fallback rule applies to all routes and cannot have zones.' },
+    date: { invalid: 'Enter a valid date.', order: 'The end date must be after the start date.' },
   },
   errors: {
     VALIDATION_FAILED: 'Please correct the highlighted fields.',
@@ -336,6 +346,17 @@ export const en = {
     SHIPMENT_MERCHANT_INVALID: 'This merchant does not exist or is not active.',
     SHIPMENT_DRIVER_INVALID: 'This driver does not exist or is not active.',
     SHIPMENT_COD_MISMATCH: 'The collected amount does not match the cash on delivery.',
+    PRICING_UNAVAILABLE: 'No delivery price is set for this route yet. Contact COOBRA to add it.',
+    PRICE_CHANGED:
+      'The delivery price for this route changed. Check the new price and confirm again.',
+    QUOTE_INVALID: 'This price quote expired or was already used. Get a new price.',
+    ZONE_INVALID: 'This area does not exist.',
+    ZONE_INACTIVE: 'Deliveries to this area are currently unavailable.',
+    ORIGIN_ZONE_REQUIRED:
+      'Set your pickup area first (Settings), or choose where the shipment starts.',
+    FEE_OVERRIDE_NOT_ALLOWED:
+      'The fee can no longer be changed directly. Use a financial correction.',
+    CONFLICT: 'This record was changed in the meantime. Reload and try again.',
     NETWORK: 'Cannot reach the server. Check your connection and try again.',
   },
   email: {

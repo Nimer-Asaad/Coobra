@@ -1,8 +1,9 @@
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { Server } from 'node:http';
-import { clientAppForRole, type UserRole } from '@coobra/shared';
+import { clientAppForRole, GOVERNORATES, type UserRole } from '@coobra/shared';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { PrismaClient } from '@coobra/database';
 import { AppModule } from '../src/app.module.js';
@@ -75,10 +76,55 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
   return { app, config, mail, prisma: app.get(PrismaService).client };
 }
 
+const SEEDED_ZONES = GOVERNORATES.map((code) => `'${code}'`).join(', ');
+
+/** Wipes test data. Seeded root zones and zone kinds (from the migration) are kept. */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE cod_collections, shipment_status_history, shipments, audit_logs, auth_tokens, sessions, merchant_profiles, users CASCADE',
+    'TRUNCATE TABLE shipment_fee_overrides, shipment_pricing, pricing_quotes, pricing_rules, cod_collections, shipment_status_history, shipments, audit_logs, auth_tokens, sessions, merchant_profiles, users CASCADE',
   );
+  for (;;) {
+    const deleted = await prisma.$executeRawUnsafe(
+      `DELETE FROM zones WHERE code NOT IN (${SEEDED_ZONES}) AND id NOT IN (SELECT parent_id FROM zones WHERE parent_id IS NOT NULL)`,
+    );
+    if (deleted === 0) break;
+  }
+  await prisma.$executeRawUnsafe('UPDATE zones SET active = true WHERE active = false');
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM zone_kinds WHERE code NOT IN ('REGION', 'GOVERNORATE', 'CITY', 'TOWN', 'SUBZONE')`,
+  );
+}
+
+export async function zoneId(prisma: PrismaClient, code: string): Promise<string> {
+  return (await prisma.zone.findUniqueOrThrow({ where: { code } })).id;
+}
+
+/** Pickup zone Ramallah for the merchants and two general route rules: R→R 15, R→Nablus 25. */
+export async function setupBasicPricing(prisma: PrismaClient, merchantIds: string[]) {
+  const ramallah = await zoneId(prisma, 'RAMALLAH_ALBIREH');
+  const nablus = await zoneId(prisma, 'NABLUS');
+  await prisma.merchantProfile.updateMany({
+    where: { userId: { in: merchantIds } },
+    data: { defaultPickupZoneId: ramallah },
+  });
+  await prisma.pricingRule.createMany({
+    data: [
+      {
+        ruleGroupId: randomUUID(),
+        originZoneId: ramallah,
+        destinationZoneId: ramallah,
+        deliveryFee: '15',
+        returnFee: '10',
+      },
+      {
+        ruleGroupId: randomUUID(),
+        originZoneId: ramallah,
+        destinationZoneId: nablus,
+        deliveryFee: '25',
+      },
+    ],
+  });
+  return { ramallah, nablus };
 }
 
 /** Inserts a verified SUPER_ADMIN directly, as the bootstrap CLI does. */

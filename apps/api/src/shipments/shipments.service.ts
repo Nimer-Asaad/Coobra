@@ -24,8 +24,10 @@ import {
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
 import { isUniqueViolation } from '../auth/auth.service.js';
-import { Errors } from '../common/app-exception.js';
+import { AppException, Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
+import { PricingService, type PriceResult } from '../pricing/pricing.service.js';
+import { ZonesService } from '../pricing/zones.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   shipmentDetailsInclude,
@@ -56,7 +58,23 @@ export class ShipmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly pricing: PricingService,
+    private readonly zones: ZonesService,
   ) {}
+
+  /** Maps a shipment with zone labels (paths) resolved. */
+  private async toDetails(db: Tx, shipment: Parameters<typeof toShipmentDetails>[0]) {
+    const labels = await this.zones.labels(
+      db,
+      [
+        shipment.originZoneId,
+        shipment.destinationZoneId,
+        shipment.pricing?.originZoneId,
+        shipment.pricing?.destinationZoneId,
+      ].filter((id): id is string => !!id),
+    );
+    return toShipmentDetails(shipment, labels);
+  }
 
   /** Fails closed: only the staff viewer roles see every shipment. */
   private scopeFor(actor: Actor): Prisma.ShipmentWhereInput {
@@ -93,8 +111,12 @@ export class ShipmentsService {
         take: query.pageSize,
       }),
     ]);
+    const labels = await this.zones.labels(
+      this.prisma.client,
+      rows.map((row) => row.destinationZoneId).filter((id): id is string => !!id),
+    );
     return {
-      items: rows.map(toShipmentListItem),
+      items: rows.map((row) => toShipmentListItem(row, labels)),
       page: query.page,
       pageSize: query.pageSize,
       total,
@@ -129,7 +151,8 @@ export class ShipmentsService {
   }
 
   async get(actor: Actor, id: string): Promise<ShipmentDetails> {
-    return toShipmentDetails(await this.findScoped(this.prisma.client, actor, id));
+    const db = this.prisma.client;
+    return this.toDetails(db, await this.findScoped(db, actor, id));
   }
 
   private async findScoped(db: Tx, actor: Actor, id: string) {
@@ -142,31 +165,82 @@ export class ShipmentsService {
     return shipment;
   }
 
-  /** A merchant creates a shipment for their own account. */
+  /** A merchant creates a shipment for their own account, priced by the server. */
   createForMerchant(merchant: Actor, input: CreateShipmentInput, meta: RequestMeta) {
-    return this.create(merchant, merchant.id, { ...input, deliveryFee: undefined }, meta);
+    return this.create(merchant, merchant.id, input, meta, async (tx, originZoneId) => {
+      const route = {
+        merchantId: merchant.id,
+        originZoneId,
+        destinationZoneId: input.destinationZoneId,
+      };
+      const priced = input.quoteId
+        ? await this.pricing.consumeQuote(tx, { ...route, quoteId: input.quoteId })
+        : await this.pricing.price(tx, route);
+      return { priced, fee: priced.fee.toFixed(2), manual: null };
+    });
   }
 
-  /** Staff create a shipment on behalf of an existing, active merchant (recorded as staff). */
+  /**
+   * Staff create a shipment on behalf of an existing, active merchant (recorded as staff).
+   * The fee is priced automatically; a manual fee is recorded as an override with its reason.
+   */
   async createForMerchantByStaff(staff: Actor, input: AdminCreateShipmentInput, meta: RequestMeta) {
     const merchant = await this.prisma.client.user.findFirst({
       where: { id: input.merchantId, role: 'MERCHANT', status: 'ACTIVE' },
       select: { id: true },
     });
     if (!merchant) throw Errors.shipmentMerchantInvalid();
-    const { merchantId, ...fields } = input;
-    return this.create(staff, merchantId, fields, meta);
+    const { merchantId, manualFee, manualFeeReason, ...fields } = input;
+    return this.create(staff, merchantId, fields, meta, async (tx, originZoneId) => {
+      const route = { merchantId, originZoneId, destinationZoneId: input.destinationZoneId };
+      let priced: PriceResult | null = null;
+      try {
+        priced = await this.pricing.price(tx, route);
+      } catch (error) {
+        // Without a rule, staff may still price the shipment manually (with a reason).
+        if (
+          !(
+            manualFee !== undefined &&
+            error instanceof AppException &&
+            error.code === 'PRICING_UNAVAILABLE'
+          )
+        ) {
+          throw error;
+        }
+      }
+      if (manualFee !== undefined) {
+        return { priced, fee: manualFee, manual: { reason: manualFeeReason ?? '' } };
+      }
+      if (!priced) throw Errors.pricingUnavailable();
+      return { priced, fee: priced.fee.toFixed(2), manual: null };
+    });
   }
 
   private async create(
     creator: Actor,
     merchantId: string,
-    input: CreateShipmentInput & { deliveryFee?: string },
+    input: Omit<CreateShipmentInput, 'quoteId'> & { quoteId?: string },
     meta: RequestMeta,
+    priceShipment: (
+      tx: Tx,
+      originZoneId: string,
+    ) => Promise<{
+      priced: (PriceResult & { quoteId?: string }) | null;
+      fee: string;
+      manual: { reason: string } | null;
+    }>,
   ): Promise<ShipmentDetails> {
     for (let attempt = 1; ; attempt++) {
       try {
         const shipment = await this.prisma.client.$transaction(async (tx) => {
+          const originZoneId = await this.pricing.resolveOrigin(tx, merchantId, input.originZoneId);
+          const origin = await this.zones.activePath(tx, originZoneId);
+          const destination = await this.zones.activePath(tx, input.destinationZoneId);
+          const root = destination[0];
+          const leaf = destination[destination.length - 1];
+          if (!root || !leaf || !origin.length) throw Errors.zoneInvalid();
+          const { priced, fee, manual } = await priceShipment(tx, originZoneId);
+
           const created = await tx.shipment.create({
             data: {
               trackingNumber: generateTrackingNumber(),
@@ -176,16 +250,54 @@ export class ShipmentsService {
               recipientName: input.recipientName,
               recipientPhone: input.recipientPhone,
               recipientPhoneAlt: input.recipientPhoneAlt ?? null,
-              governorate: input.governorate,
-              city: input.city,
+              governorate: root.code,
+              city: input.city ?? leaf.nameAr,
               addressLine: input.addressLine,
               landmark: input.landmark ?? null,
               recipientNotes: input.recipientNotes ?? null,
               merchantNotes: input.merchantNotes ?? null,
               codAmount: input.codAmount,
-              deliveryFee: input.deliveryFee ?? null,
+              deliveryFee: fee,
+              originZoneId,
+              destinationZoneId: input.destinationZoneId,
             },
           });
+          // Immutable snapshot: later rule changes never alter this shipment's price.
+          await tx.shipmentPricing.create({
+            data: {
+              shipmentId: created.id,
+              quoteId: priced?.quoteId ?? null,
+              ruleId: priced?.rule.id ?? null,
+              ruleVersion: priced?.rule.version ?? null,
+              source: manual ? 'MANUAL' : (priced?.source ?? 'MANUAL'),
+              originZoneId,
+              destinationZoneId: input.destinationZoneId,
+              baseFee: priced?.fee ?? null,
+              finalFee: fee,
+              returnFee: priced?.returnFee ?? null,
+              pricedById: creator.id,
+            },
+          });
+          if (manual) {
+            await tx.shipmentFeeOverride.create({
+              data: {
+                shipmentId: created.id,
+                phase: 'PRE_DELIVERY',
+                status: 'APPLIED',
+                previousFee: priced?.fee ?? null,
+                newFee: fee,
+                reason: manual.reason,
+                actorId: creator.id,
+                actorRole: creator.role,
+              },
+            });
+          }
+          if (priced?.quoteId) {
+            await tx.pricingQuote.update({
+              where: { id: priced.quoteId },
+              data: { shipmentId: created.id },
+            });
+          }
           await tx.shipmentStatusHistory.create({
             data: {
               shipmentId: created.id,
@@ -195,7 +307,7 @@ export class ShipmentsService {
               actorRole: creator.role,
             },
           });
-          return this.findScoped(tx, creator, created.id);
+          return this.toDetails(tx, await this.findScoped(tx, creator, created.id));
         });
         await this.audit.record({
           action: 'SHIPMENT_CREATED',
@@ -206,9 +318,11 @@ export class ShipmentsService {
             shipmentId: shipment.id,
             trackingNumber: shipment.trackingNumber,
             onBehalfOfMerchant: creator.id !== merchantId,
+            deliveryFee: shipment.deliveryFee,
+            pricingSource: shipment.pricing?.source ?? null,
           },
         });
-        return toShipmentDetails(shipment);
+        return shipment;
       } catch (error) {
         // Tracking number collision: retry with a new random number.
         if (isUniqueViolation(error) && attempt < TRACKING_NUMBER_ATTEMPTS) continue;
@@ -279,7 +393,7 @@ export class ShipmentsService {
         },
       });
     }
-    return toShipmentDetails(shipment);
+    return this.toDetails(this.prisma.client, shipment);
   }
 
   /**
@@ -382,7 +496,7 @@ export class ShipmentsService {
         toStatus: input.toStatus,
       },
     });
-    return toShipmentDetails(shipment);
+    return this.toDetails(this.prisma.client, shipment);
   }
 
   /**
@@ -417,7 +531,7 @@ export class ShipmentsService {
             }
           : {}),
       },
-      include: { merchantProfile: { select: { businessName: true } } },
+      include: { merchantProfile: { select: { businessName: true, defaultPickupZoneId: true } } },
       orderBy: { fullName: 'asc' },
       take: PEOPLE_LIMIT,
     });
@@ -425,6 +539,7 @@ export class ShipmentsService {
       id: user.id,
       fullName: user.fullName,
       businessName: user.merchantProfile?.businessName ?? user.fullName,
+      pickupZoneId: user.merchantProfile?.defaultPickupZoneId ?? null,
       phone: user.phone,
       email: user.email,
     }));

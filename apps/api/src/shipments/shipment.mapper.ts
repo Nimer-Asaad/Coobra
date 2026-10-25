@@ -1,11 +1,13 @@
 import type { Prisma } from '@coobra/database';
 import type {
   Currency,
-  Governorate,
   ShipmentDetails,
   ShipmentListItem,
   ShipmentPerson,
+  ZoneLabel,
 } from '@coobra/shared';
+
+type Labels = Map<string, ZoneLabel>;
 
 const personSelect = { id: true, fullName: true, phone: true } as const;
 
@@ -29,6 +31,14 @@ export const shipmentDetailsInclude = {
     take: 1,
     include: { driver: { select: personSelect } },
   },
+  pricing: true,
+  feeOverrides: {
+    orderBy: { createdAt: 'asc' },
+    include: {
+      actor: { select: { id: true, fullName: true, role: true } },
+      approvedBy: { select: { id: true, fullName: true } },
+    },
+  },
 } as const satisfies Prisma.ShipmentInclude;
 
 type ShipmentForList = Prisma.ShipmentGetPayload<{ include: typeof shipmentListInclude }>;
@@ -39,15 +49,18 @@ const iso = (value: Date | null) => (value ? value.toISOString() : null);
 const person = (value: ShipmentPerson | null): ShipmentPerson | null =>
   value ? { id: value.id, fullName: value.fullName, phone: value.phone } : null;
 
-export function toShipmentListItem(shipment: ShipmentForList): ShipmentListItem {
+export function toShipmentListItem(shipment: ShipmentForList, labels: Labels): ShipmentListItem {
   return {
     id: shipment.id,
     trackingNumber: shipment.trackingNumber,
     status: shipment.status,
     recipientName: shipment.recipientName,
     recipientPhone: shipment.recipientPhone,
-    governorate: shipment.governorate as Governorate,
+    governorate: shipment.governorate,
     city: shipment.city,
+    destination: shipment.destinationZoneId
+      ? (labels.get(shipment.destinationZoneId) ?? null)
+      : null,
     codAmount: money(shipment.codAmount),
     deliveryFee: shipment.deliveryFee ? money(shipment.deliveryFee) : null,
     currency: shipment.currency as Currency,
@@ -63,10 +76,37 @@ export function toShipmentListItem(shipment: ShipmentForList): ShipmentListItem 
   };
 }
 
-export function toShipmentDetails(shipment: ShipmentForDetails): ShipmentDetails {
+export function toShipmentDetails(shipment: ShipmentForDetails, labels: Labels): ShipmentDetails {
   const cod = shipment.codCollections[0];
+  const label = (id: string | null | undefined) => (id ? (labels.get(id) ?? null) : null);
+  const pricing = shipment.pricing;
   return {
-    ...toShipmentListItem(shipment),
+    ...toShipmentListItem(shipment, labels),
+    origin: label(shipment.originZoneId),
+    pricing: pricing
+      ? {
+          source: pricing.source,
+          ruleId: pricing.ruleId,
+          ruleVersion: pricing.ruleVersion,
+          origin: label(pricing.originZoneId),
+          destination: label(pricing.destinationZoneId),
+          baseFee: pricing.baseFee ? money(pricing.baseFee) : null,
+          finalFee: money(pricing.finalFee),
+          returnFee: pricing.returnFee ? money(pricing.returnFee) : null,
+          pricedAt: pricing.pricedAt.toISOString(),
+          overrides: shipment.feeOverrides.map((override) => ({
+            id: override.id,
+            phase: override.phase,
+            status: override.status,
+            previousFee: override.previousFee ? money(override.previousFee) : null,
+            newFee: money(override.newFee),
+            reason: override.reason,
+            actor: override.actor,
+            approvedBy: override.approvedBy,
+            createdAt: override.createdAt.toISOString(),
+          })),
+        }
+      : null,
     recipientPhoneAlt: shipment.recipientPhoneAlt,
     addressLine: shipment.addressLine,
     landmark: shipment.landmark,

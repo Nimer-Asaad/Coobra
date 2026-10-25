@@ -5,14 +5,14 @@ import {
   createSignedInUser,
   createTestApp,
   resetDatabase,
+  setupBasicPricing,
   type TestContext,
   type TestUser,
 } from './helpers.js';
 
-const shipmentInput = {
+const shipmentInput: Record<string, unknown> = {
   recipientName: 'Ahmad Khalil',
   recipientPhone: '٠٥٩٩-١٢٣-٤٥٦',
-  governorate: 'RAMALLAH_ALBIREH',
   city: 'Al-Bireh',
   addressLine: 'Al-Quds street, building 5',
   landmark: 'Next to the bakery',
@@ -29,6 +29,7 @@ describe('Shipments (PostgreSQL integration)', () => {
   let merchantB: TestUser;
   let driver1: TestUser;
   let driver2: TestUser;
+  let zones: { ramallah: string; nablus: string };
   const server = () => ctx.app.getHttpServer() as App;
 
   const api = (user: TestUser) => ({
@@ -55,6 +56,8 @@ describe('Shipments (PostgreSQL integration)', () => {
     });
     driver1 = await createSignedInUser(ctx, 'DRIVER', 'd1@example.com', { fullName: 'Driver One' });
     driver2 = await createSignedInUser(ctx, 'DRIVER', 'd2@example.com', { fullName: 'Driver Two' });
+    zones = await setupBasicPricing(ctx.prisma, [merchantA.id, merchantB.id]);
+    shipmentInput.destinationZoneId = zones.ramallah;
   });
 
   afterAll(async () => {
@@ -103,7 +106,7 @@ describe('Shipments (PostgreSQL integration)', () => {
       status: 'CREATED',
       recipientPhone: '0599123456',
       codAmount: '150.00',
-      deliveryFee: null,
+      deliveryFee: '15.00',
       currency: 'ILS',
       creatorRole: 'MERCHANT',
       merchant: { id: merchantA.id, businessName: 'Store A' },
@@ -130,7 +133,12 @@ describe('Shipments (PostgreSQL integration)', () => {
 
   it('lets SUPER_ADMIN and OPERATIONS create shipments on behalf of a merchant, recorded as staff', async () => {
     const res = await api(ops)
-      .post('/v1/admin/shipments', { ...shipmentInput, merchantId: merchantA.id, deliveryFee: 20 })
+      .post('/v1/admin/shipments', {
+        ...shipmentInput,
+        merchantId: merchantA.id,
+        manualFee: 20,
+        manualFeeReason: 'Contract price',
+      })
       .expect(201);
     const shipment = res.body as ShipmentDetails;
     expect(shipment).toMatchObject({
@@ -389,7 +397,10 @@ describe('Shipments (PostgreSQL integration)', () => {
 
   it('paginates, searches and filters lists and counts statuses', async () => {
     const first = await merchantCreates(merchantA, { recipientName: 'Lina Haddad' });
-    await merchantCreates(merchantA, { recipientPhone: '+970 568 777 888', governorate: 'NABLUS' });
+    await merchantCreates(merchantA, {
+      recipientPhone: '+970 568 777 888',
+      destinationZoneId: zones.nablus,
+    });
     await merchantCreates(merchantB);
     await assign(first.id, driver1).expect(200);
 

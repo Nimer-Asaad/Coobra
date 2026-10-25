@@ -61,31 +61,39 @@ model User {
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")
 
-  createdBy         User?                   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdUsers      User[]                  @relation("UserCreatedBy")
-  merchantProfile   MerchantProfile?
-  sessions          Session[]
-  authTokens        AuthToken[]
-  auditLogsAsActor  AuditLog[]              @relation("AuditActor")
-  auditLogsAsTarget AuditLog[]              @relation("AuditTarget")
-  merchantShipments Shipment[]              @relation("ShipmentMerchant")
-  createdShipments  Shipment[]              @relation("ShipmentCreator")
-  driverShipments   Shipment[]              @relation("ShipmentDriver")
-  statusChanges     ShipmentStatusHistory[] @relation("ShipmentHistoryActor")
-  historyAsDriver   ShipmentStatusHistory[] @relation("ShipmentHistoryDriver")
-  codCollections    CodCollection[]         @relation("CodCollectionDriver")
+  createdBy            User?                   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers         User[]                  @relation("UserCreatedBy")
+  merchantProfile      MerchantProfile?
+  sessions             Session[]
+  authTokens           AuthToken[]
+  auditLogsAsActor     AuditLog[]              @relation("AuditActor")
+  auditLogsAsTarget    AuditLog[]              @relation("AuditTarget")
+  merchantShipments    Shipment[]              @relation("ShipmentMerchant")
+  createdShipments     Shipment[]              @relation("ShipmentCreator")
+  driverShipments      Shipment[]              @relation("ShipmentDriver")
+  statusChanges        ShipmentStatusHistory[] @relation("ShipmentHistoryActor")
+  historyAsDriver      ShipmentStatusHistory[] @relation("ShipmentHistoryDriver")
+  codCollections       CodCollection[]         @relation("CodCollectionDriver")
+  pricingRules         PricingRule[]           @relation("PricingRuleMerchant")
+  createdPricingRules  PricingRule[]           @relation("PricingRuleCreator")
+  pricingQuotes        PricingQuote[]          @relation("PricingQuoteMerchant")
+  feeOverrides         ShipmentFeeOverride[]   @relation("FeeOverrideActor")
+  approvedFeeOverrides ShipmentFeeOverride[]   @relation("FeeOverrideApprover")
 
   @@index([role])
   @@map("users")
 }
 
 model MerchantProfile {
-  userId       String   @id @map("user_id") @db.Uuid
-  businessName String   @map("business_name")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  userId              String   @id @map("user_id") @db.Uuid
+  businessName        String   @map("business_name")
+  /// Phase 3: default origin zone used for pricing (nullable for existing merchants).
+  defaultPickupZoneId String?  @map("default_pickup_zone_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultPickupZone Zone? @relation("MerchantPickupZone", fields: [defaultPickupZoneId], references: [id], onDelete: Restrict)
 
   @@map("merchant_profiles")
 }
@@ -203,16 +211,24 @@ model Shipment {
   failureReason      String?        @map("failure_reason")
   cancellationReason String?        @map("cancellation_reason")
   returnReason       String?        @map("return_reason")
+  /// Phase 3: pricing zones (nullable for Phase 2 shipments).
+  originZoneId       String?        @map("origin_zone_id") @db.Uuid
+  destinationZoneId  String?        @map("destination_zone_id") @db.Uuid
   /// Optimistic concurrency token, incremented on every change.
   version            Int            @default(0)
   createdAt          DateTime       @default(now()) @map("created_at")
   updatedAt          DateTime       @updatedAt @map("updated_at")
 
-  merchant       User                    @relation("ShipmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
-  createdBy      User?                   @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  driver         User?                   @relation("ShipmentDriver", fields: [driverId], references: [id], onDelete: Restrict)
-  history        ShipmentStatusHistory[]
-  codCollections CodCollection[]
+  merchant        User                    @relation("ShipmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  createdBy       User?                   @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  driver          User?                   @relation("ShipmentDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  history         ShipmentStatusHistory[]
+  codCollections  CodCollection[]
+  originZone      Zone?                   @relation("ShipmentOriginZone", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone?                   @relation("ShipmentDestinationZone", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  pricing         ShipmentPricing?
+  feeOverrides    ShipmentFeeOverride[]
+  pricingQuote    PricingQuote?
 
   @@index([merchantId, createdAt(sort: Desc)])
   @@index([driverId, status])
@@ -220,6 +236,7 @@ model Shipment {
   @@index([governorate])
   @@index([recipientPhone])
   @@index([createdAt(sort: Desc)])
+  @@index([destinationZoneId])
   @@map("shipments")
 }
 
@@ -264,4 +281,185 @@ model CodCollection {
   @@index([shipmentId])
   @@index([driverId, recordedAt])
   @@map("cod_collections")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — zones and pricing
+// ---------------------------------------------------------------------------
+
+/// Configurable labels for zone levels (region, governorate, city, town, subzone, …).
+model ZoneKind {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  code      String   @unique
+  nameAr    String   @map("name_ar")
+  nameEn    String   @map("name_en")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  zones Zone[]
+
+  @@map("zone_kinds")
+}
+
+/// Hierarchical delivery zone. `code` is the stable identifier; names are for display only.
+/// The parent is fixed at creation, so `depth` (0 = root) never changes.
+model Zone {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  code      String   @unique
+  kindId    String   @map("kind_id") @db.Uuid
+  parentId  String?  @map("parent_id") @db.Uuid
+  depth     Int      @default(0)
+  nameAr    String   @map("name_ar")
+  nameEn    String   @map("name_en")
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  kind     ZoneKind @relation(fields: [kindId], references: [id], onDelete: Restrict)
+  parent   Zone?    @relation("ZoneTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Zone[]   @relation("ZoneTree")
+
+  merchantPickups      MerchantProfile[] @relation("MerchantPickupZone")
+  originShipments      Shipment[]        @relation("ShipmentOriginZone")
+  destinationShipments Shipment[]        @relation("ShipmentDestinationZone")
+  originRules          PricingRule[]     @relation("PricingRuleOrigin")
+  destinationRules     PricingRule[]     @relation("PricingRuleDestination")
+
+  @@index([parentId])
+  @@map("zones")
+}
+
+enum PricingSource {
+  MERCHANT_ROUTE
+  GENERAL_ROUTE
+  MERCHANT_FALLBACK
+  GENERAL_FALLBACK
+  MANUAL
+  LEGACY
+}
+
+/// A versioned delivery price. Editing creates a new version (same `ruleGroupId`) and deactivates
+/// the previous one, so the rule a shipment was priced with is always preserved.
+model PricingRule {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  ruleGroupId       String    @map("rule_group_id") @db.Uuid
+  version           Int       @default(1)
+  /// Null = general rule; otherwise only for this merchant.
+  merchantId        String?   @map("merchant_id") @db.Uuid
+  originZoneId      String?   @map("origin_zone_id") @db.Uuid
+  destinationZoneId String?   @map("destination_zone_id") @db.Uuid
+  /// Explicit fallback: applies when no route rule matches (zones must be null).
+  isFallback        Boolean   @default(false) @map("is_fallback")
+  deliveryFee       Decimal   @map("delivery_fee") @db.Decimal(12, 2)
+  /// Null = return fee not configured (RETURN_FEE_UNCONFIGURED).
+  returnFee         Decimal?  @map("return_fee") @db.Decimal(12, 2)
+  currency          Currency  @default(ILS)
+  priority          Int       @default(0)
+  effectiveFrom     DateTime  @default(now()) @map("effective_from")
+  effectiveTo       DateTime? @map("effective_to")
+  active            Boolean   @default(true)
+  note              String?
+  createdById       String?   @map("created_by_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
+  supersededAt      DateTime? @map("superseded_at")
+
+  merchant        User?             @relation("PricingRuleMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  originZone      Zone?             @relation("PricingRuleOrigin", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone?             @relation("PricingRuleDestination", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  createdBy       User?             @relation("PricingRuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  quotes          PricingQuote[]
+  snapshots       ShipmentPricing[]
+
+  @@unique([ruleGroupId, version])
+  @@index([active, merchantId])
+  @@index([originZoneId, destinationZoneId])
+  @@map("pricing_rules")
+}
+
+/// A single-use price quote shown to a merchant, valid until `expiresAt`.
+model PricingQuote {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  merchantId        String        @map("merchant_id") @db.Uuid
+  originZoneId      String        @map("origin_zone_id") @db.Uuid
+  destinationZoneId String        @map("destination_zone_id") @db.Uuid
+  ruleId            String        @map("rule_id") @db.Uuid
+  ruleVersion       Int           @map("rule_version")
+  source            PricingSource
+  deliveryFee       Decimal       @map("delivery_fee") @db.Decimal(12, 2)
+  returnFee         Decimal?      @map("return_fee") @db.Decimal(12, 2)
+  currency          Currency      @default(ILS)
+  createdById       String        @map("created_by_id") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at")
+  expiresAt         DateTime      @map("expires_at")
+  usedAt            DateTime?     @map("used_at")
+  shipmentId        String?       @unique @map("shipment_id") @db.Uuid
+
+  merchant User        @relation("PricingQuoteMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  rule     PricingRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  shipment Shipment?   @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+
+  @@index([merchantId, createdAt])
+  @@map("pricing_quotes")
+}
+
+/// Immutable record of how a shipment was priced. Rule changes never touch it.
+model ShipmentPricing {
+  shipmentId        String        @id @map("shipment_id") @db.Uuid
+  quoteId           String?       @unique @map("quote_id") @db.Uuid
+  ruleId            String?       @map("rule_id") @db.Uuid
+  ruleVersion       Int?          @map("rule_version")
+  source            PricingSource
+  originZoneId      String?       @map("origin_zone_id") @db.Uuid
+  destinationZoneId String?       @map("destination_zone_id") @db.Uuid
+  /// Automatically calculated fee (null when no rule applied).
+  baseFee           Decimal?      @map("base_fee") @db.Decimal(12, 2)
+  /// Fee charged when priced (later changes are recorded as overrides).
+  finalFee          Decimal       @map("final_fee") @db.Decimal(12, 2)
+  /// Return fee from the rule; null = not configured.
+  returnFee         Decimal?      @map("return_fee") @db.Decimal(12, 2)
+  currency          Currency      @default(ILS)
+  pricedAt          DateTime      @default(now()) @map("priced_at")
+  pricedById        String?       @map("priced_by_id") @db.Uuid
+
+  shipment Shipment     @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  rule     PricingRule? @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+
+  @@map("shipment_pricing")
+}
+
+enum FeeOverridePhase {
+  PRE_DELIVERY
+  POST_DELIVERY
+}
+
+enum ApprovalStatus {
+  APPLIED
+  PENDING_APPROVAL
+  REJECTED
+}
+
+/// Append-only history of manual delivery-fee changes (reason mandatory).
+model ShipmentFeeOverride {
+  id           String           @id @default(uuid(7)) @db.Uuid
+  shipmentId   String           @map("shipment_id") @db.Uuid
+  phase        FeeOverridePhase
+  status       ApprovalStatus
+  previousFee  Decimal?         @map("previous_fee") @db.Decimal(12, 2)
+  newFee       Decimal          @map("new_fee") @db.Decimal(12, 2)
+  reason       String
+  actorId      String           @map("actor_id") @db.Uuid
+  actorRole    UserRole         @map("actor_role")
+  approvedById String?          @map("approved_by_id") @db.Uuid
+  decidedAt    DateTime?        @map("decided_at")
+  decisionNote String?          @map("decision_note")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  actor      User     @relation("FeeOverrideActor", fields: [actorId], references: [id], onDelete: Restrict)
+  approvedBy User?    @relation("FeeOverrideApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([shipmentId, createdAt])
+  @@map("shipment_fee_overrides")
 }

@@ -19,7 +19,7 @@ import { toFieldErrors } from './validation.js';
 const validShipment = {
   recipientName: 'أحمد خليل',
   recipientPhone: '0599 123 456',
-  governorate: 'RAMALLAH_ALBIREH',
+  destinationZoneId: '0199a1c2-7d3e-7f00-8000-0000000000aa',
   city: 'البيرة',
   addressLine: 'شارع القدس، عمارة 5',
   codAmount: '150',
@@ -86,14 +86,14 @@ describe('createShipmentSchema', () => {
     const result = createShipmentSchema.safeParse({
       ...validShipment,
       recipientPhone: '123',
-      governorate: 'PARIS',
+      destinationZoneId: 'PARIS',
       codAmount: '-1',
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(toFieldErrors(result.error)).toEqual({
         recipientPhone: 'validation.phone.invalid',
-        governorate: 'validation.governorate.invalid',
+        destinationZoneId: 'validation.zone.required',
         codAmount: 'validation.money.invalid',
       });
     }
@@ -106,16 +106,30 @@ describe('createShipmentSchema', () => {
 });
 
 describe('adminCreateShipmentSchema', () => {
-  it('requires a merchant and accepts an optional delivery fee', () => {
+  it('requires a merchant; a manual fee is an override that needs a reason', () => {
     const merchantId = '0199a1c2-7d3e-7f00-8000-000000000001';
     expect(adminCreateShipmentSchema.safeParse(validShipment).success).toBe(false);
     expect(
-      adminCreateShipmentSchema.parse({ ...validShipment, merchantId, deliveryFee: '' })
-        .deliveryFee,
+      adminCreateShipmentSchema.parse({ ...validShipment, merchantId, manualFee: '' }).manualFee,
     ).toBeUndefined();
+    const noReason = adminCreateShipmentSchema.safeParse({
+      ...validShipment,
+      merchantId,
+      manualFee: '20',
+    });
+    expect(noReason.success).toBe(false);
+    if (!noReason.success) {
+      expect(toFieldErrors(noReason.error)).toEqual({
+        manualFeeReason: 'validation.reason.required',
+      });
+    }
     expect(
-      adminCreateShipmentSchema.parse({ ...validShipment, merchantId, deliveryFee: '20' })
-        .deliveryFee,
+      adminCreateShipmentSchema.parse({
+        ...validShipment,
+        merchantId,
+        manualFee: '20',
+        manualFeeReason: 'Special contract',
+      }).manualFee,
     ).toBe('20.00');
   });
 });
