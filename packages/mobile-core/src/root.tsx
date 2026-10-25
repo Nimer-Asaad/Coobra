@@ -15,7 +15,10 @@ import { AppButton } from './ui/button';
 import { AppText } from './ui/text';
 import { colors, spacing } from './ui/theme';
 
-async function restoreSession(api: ApiClient): Promise<void> {
+async function restoreSession(
+  api: ApiClient,
+  clientApp: MobileAppConfig['clientApp'],
+): Promise<void> {
   const store = useSessionStore.getState();
   const token = await store.loadToken();
   if (!usesCookieSessions && !token) {
@@ -23,7 +26,13 @@ async function restoreSession(api: ApiClient): Promise<void> {
     return;
   }
   try {
-    const { user } = await api.request<MeResponse>('/v1/auth/me');
+    const { user, session } = await api.request<MeResponse>('/v1/auth/me');
+    // On web every COOBRA app shares the API's cookie, so another app's session may be
+    // present (e.g. a merchant signed in on the same browser). Never adopt it here.
+    if (session.clientApp !== clientApp) {
+      await store.signOut();
+      return;
+    }
     await store.signIn(user, token ?? undefined);
   } catch (error) {
     if (error instanceof NetworkError) store.setStatus('offline');
@@ -60,13 +69,13 @@ export function CoobraRoot({ config, children }: { config: MobileAppConfig; chil
 
   const retry = useCallback(() => {
     useSessionStore.getState().setStatus('unknown');
-    void restoreSession(api);
-  }, [api]);
+    void restoreSession(api, config.clientApp);
+  }, [api, config.clientApp]);
 
   useEffect(() => {
     void useLanguageStore.getState().hydrate();
-    void restoreSession(api);
-  }, [api]);
+    void restoreSession(api, config.clientApp);
+  }, [api, config.clientApp]);
 
   const ready = languageHydrated && status !== 'unknown';
 
