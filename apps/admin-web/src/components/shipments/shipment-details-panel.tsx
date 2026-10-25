@@ -7,7 +7,9 @@ import { useTranslation } from 'react-i18next';
 import {
   ASSIGNABLE_STATUSES,
   availableShipmentTransitions,
+  feeOverrideSchema,
   type DriverOption,
+  type FeeOverrideInput,
   type ShipmentDetails,
   type ShipmentStatus,
   type ShipmentTransitionRule,
@@ -23,6 +25,9 @@ import { NativeSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { bff, ClientApiError } from '@/lib/api-client';
 import { formatDateTime, formatMoney } from '@/lib/format';
+import { useFormErrors } from '@/lib/use-form-errors';
+import { zoneText } from '@/lib/zones';
+import { FormField } from '@/components/form-field';
 import { StatusBadge } from './status-badge';
 
 export function ShipmentDetailsPanel({ id, canManage }: { id: string; canManage: boolean }) {
@@ -76,7 +81,7 @@ export function ShipmentDetailsPanel({ id, canManage }: { id: string; canManage:
                   ) : null}
                 </Item>
                 <Item label={t('shipments.details.address')}>
-                  {t(`governorates.${s.governorate}`)} — {s.city}
+                  {zoneText(s.destination, lang) ?? t(`governorates.${s.governorate}`)} — {s.city}
                   <br />
                   {s.addressLine}
                   {s.landmark ? (
@@ -144,6 +149,8 @@ export function ShipmentDetailsPanel({ id, canManage }: { id: string; canManage:
               </dl>
             </CardContent>
           </Card>
+
+          <PricingCard shipment={s} canOverride={canManage} queryKey={key} />
 
           <Card>
             <CardHeader>
@@ -399,5 +406,142 @@ function TransitionForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+const OVERRIDABLE: readonly ShipmentStatus[] = [
+  'CREATED',
+  'ASSIGNED',
+  'PICKED_UP',
+  'OUT_FOR_DELIVERY',
+  'DELIVERY_FAILED',
+];
+
+/** How the fee was priced, every manual change, and the pre-delivery override form. */
+function PricingCard({
+  shipment,
+  canOverride,
+  queryKey,
+}: {
+  shipment: ShipmentDetails;
+  canOverride: boolean;
+  queryKey: string[];
+}) {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const { fieldErrors, validate, applyApiError } = useFormErrors();
+  const pricing = shipment.pricing;
+  const override = useMutation({
+    mutationFn: (body: FeeOverrideInput) =>
+      bff(`/v1/admin/shipments/${shipment.id}/fee-override`, { method: 'POST', body }),
+    onSuccess: () => {
+      setOpen(false);
+      void queryClient.invalidateQueries({ queryKey });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'shipments'] });
+    },
+    onError: applyApiError,
+  });
+  const allowed = canOverride && OVERRIDABLE.includes(shipment.status);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('pricing.title')}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <dl className="grid gap-4 sm:grid-cols-2">
+          <Item label={t('pricing.final')}>
+            {shipment.deliveryFee
+              ? formatMoney(shipment.deliveryFee, lang, shipment.currency)
+              : t('shipments.fields.deliveryFeePending')}
+          </Item>
+          {pricing ? (
+            <>
+              <Item label={t('pricing.base')}>
+                {pricing.baseFee ? formatMoney(pricing.baseFee, lang) : '—'}
+                <span className="block text-sm text-muted-foreground">
+                  {t(`pricing.source.${pricing.source}`)}
+                  {pricing.ruleVersion
+                    ? ` · ${t('pricing.version', { version: pricing.ruleVersion })}`
+                    : ''}
+                </span>
+              </Item>
+              <Item label={t('pricing.returnFeeShort')}>
+                {pricing.returnFee
+                  ? formatMoney(pricing.returnFee, lang)
+                  : t('pricing.returnFeeUnset')}
+              </Item>
+              <Item label={t('pricing.origin')}>{zoneText(pricing.origin, lang) ?? '—'}</Item>
+            </>
+          ) : (
+            <Item label={t('pricing.base')}>{t('pricing.source.LEGACY')}</Item>
+          )}
+        </dl>
+        {pricing && pricing.overrides.length > 0 ? (
+          <div>
+            <p className="mb-2 text-sm font-medium">{t('pricing.overrides')}</p>
+            <ul className="flex flex-col gap-2 text-sm">
+              {pricing.overrides.map((entry) => (
+                <li key={entry.id} className="rounded bg-muted px-3 py-2">
+                  {t('pricing.from', {
+                    fee: entry.previousFee ? formatMoney(entry.previousFee, lang) : '—',
+                    newFee: formatMoney(entry.newFee, lang),
+                  })}{' '}
+                  · {entry.actor.fullName} ({t(`roles.${entry.actor.role}`)}) ·{' '}
+                  {formatDateTime(entry.createdAt, lang)}
+                  <span className="block">{entry.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {allowed ? (
+          open ? (
+            <form
+              noValidate
+              className="flex flex-col gap-3 rounded-md border p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                const values = validate(feeOverrideSchema, {
+                  fee: form.get('fee'),
+                  reason: form.get('reason'),
+                });
+                if (values) override.mutate(values);
+              }}
+            >
+              <p className="text-sm text-muted-foreground">{t('pricing.overrideHint')}</p>
+              <FormField
+                name="fee"
+                dir="ltr"
+                inputMode="decimal"
+                label={t('pricing.deliveryFee')}
+                error={fieldErrors.fee}
+              />
+              <FormField
+                name="reason"
+                label={t('pricing.overrideReason')}
+                error={fieldErrors.reason}
+              />
+              {fieldErrors.fee || fieldErrors.reason ? null : <ErrorAlert error={override.error} />}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={override.isPending}>
+                  {t('pricing.overrideSubmit')}
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <Button variant="outline" className="self-start" onClick={() => setOpen(true)}>
+              {t('pricing.override')}
+            </Button>
+          )
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

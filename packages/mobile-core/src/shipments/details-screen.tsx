@@ -20,7 +20,7 @@ import { colors, radius, spacing } from '../ui/theme';
 import { useDirection } from '../ui/use-direction';
 import { useShipment, useShipmentTransition } from './api';
 import { InfoRow, Row, Section, StatusBadge, Timeline } from './components';
-import { formatDateTime, formatMoney } from './format';
+import { formatDateTime, formatMoney, zoneText } from './format';
 
 function openMaps(shipment: ShipmentDetails, governorateLabel: string) {
   const query = [shipment.addressLine, shipment.landmark, shipment.city, governorateLabel]
@@ -57,7 +57,7 @@ export function ShipmentDetailsScreen() {
   }
 
   const s = shipment.data;
-  const governorate = t(`governorates.${s.governorate}`);
+  const governorate = zoneText(s.destination, language) ?? t(`governorates.${s.governorate}`);
   const transitions = availableShipmentTransitions(s.status, actor);
 
   return (

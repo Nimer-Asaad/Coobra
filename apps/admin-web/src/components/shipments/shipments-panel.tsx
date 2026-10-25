@@ -6,7 +6,6 @@ import type { ReactNode } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 import {
-  GOVERNORATES,
   SHIPMENT_STATUSES,
   type DriverOption,
   type MerchantOption,
@@ -24,6 +23,8 @@ import { NativeSelect } from '@/components/ui/select';
 import { bff } from '@/lib/api-client';
 import { formatDateTime, formatMoney, startOfLocalDay, startOfNextLocalDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { zoneText } from '@/lib/zones';
+import { useAdminZones } from '@/components/zones/zone-select';
 import { StatusBadge, STATUS_STYLES } from './status-badge';
 
 const PAGE_SIZE = 20;
@@ -70,6 +71,8 @@ export function ShipmentsPanel({ canManage }: { canManage: boolean }) {
     queryKey: ['admin', 'merchants', ''],
     queryFn: () => bff<MerchantOption[]>('/v1/admin/merchants'),
   });
+  const zones = useAdminZones();
+  const rootZones = (zones.data ?? []).filter((zone) => zone.depth === 0);
   const drivers = useQuery({
     queryKey: ['admin', 'drivers', ''],
     queryFn: () => bff<DriverOption[]>('/v1/admin/drivers'),
@@ -156,9 +159,9 @@ export function ShipmentsPanel({ canManage }: { canManage: boolean }) {
               value={filters.governorate}
             >
               <option value="">{t('shipments.filters.allGovernorates')}</option>
-              {GOVERNORATES.map((code) => (
-                <option key={code} value={code}>
-                  {t(`governorates.${code}`)}
+              {rootZones.map((zone) => (
+                <option key={zone.id} value={zone.code}>
+                  {i18n.language === 'ar' ? zone.nameAr : zone.nameEn}
                 </option>
               ))}
             </FilterSelect>
@@ -273,7 +276,8 @@ export function ShipmentsPanel({ canManage }: { canManage: boolean }) {
                           </div>
                         </td>
                         <td className="py-2.5 pe-3">
-                          {t(`governorates.${shipment.governorate}`)}
+                          {zoneText(shipment.destination, i18n.language) ??
+                            t(`governorates.${shipment.governorate}`)}
                           <div className="text-xs text-muted-foreground">{shipment.city}</div>
                         </td>
                         <td className="py-2.5 pe-3">{shipment.merchant.businessName}</td>

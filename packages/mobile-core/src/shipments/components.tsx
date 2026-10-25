@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import type { ShipmentHistoryEntry, ShipmentListItem, ShipmentStatus } from '@coobra/shared';
 import { translateValidation } from '@coobra/i18n';
 import { AppText } from '../ui/text';
 import { colors, radius, spacing } from '../ui/theme';
 import { useDirection } from '../ui/use-direction';
-import { formatDateTime, formatMoney } from './format';
+import { formatDateTime, formatMoney, zoneText } from './format';
 
 const STATUS_COLORS: Record<ShipmentStatus, { background: string; text: string }> = {
   CREATED: { background: '#f1f5f9', text: '#1e293b' },
@@ -59,7 +59,8 @@ export function ShipmentCard({
       </Row>
       <AppText variant="subtitle">{shipment.recipientName}</AppText>
       <AppText variant="muted">
-        {t(`governorates.${shipment.governorate}`)} — {shipment.city}
+        {zoneText(shipment.destination, language) ?? t(`governorates.${shipment.governorate}`)}
+        {shipment.destination ? '' : ` — ${shipment.city}`}
       </AppText>
       <Row>
         <AppText variant="muted">{formatDateTime(shipment.createdAt, language)}</AppText>
@@ -165,6 +166,7 @@ export function ChoiceField<T extends string>({
   onChange,
   error,
   testID,
+  searchPlaceholder,
 }: {
   label: string;
   placeholder: string;
@@ -173,10 +175,18 @@ export function ChoiceField<T extends string>({
   onChange: (value: T) => void;
   error?: string;
   testID?: string;
+  /** Shows a filter box when the list is open (for long lists such as zones). */
+  searchPlaceholder?: string;
 }) {
   const { t } = useTranslation();
+  const { textAlign } = useDirection();
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
   const selected = options.find((option) => option.value === value);
+  const needle = filter.trim().toLowerCase();
+  const visible = (
+    needle ? options.filter((option) => option.label.toLowerCase().includes(needle)) : options
+  ).slice(0, 50);
   const message = translateValidation(t, error);
   return (
     <View style={styles.field}>
@@ -194,13 +204,26 @@ export function ChoiceField<T extends string>({
       </Pressable>
       {open ? (
         <View style={styles.options}>
-          {options.map((option) => (
+          {searchPlaceholder ? (
+            <TextInput
+              value={filter}
+              onChangeText={setFilter}
+              placeholder={searchPlaceholder}
+              placeholderTextColor={colors.muted}
+              accessibilityLabel={searchPlaceholder}
+              style={[styles.search, { textAlign }]}
+              autoCorrect={false}
+              testID={testID ? `${testID}-search` : undefined}
+            />
+          ) : null}
+          {visible.map((option) => (
             <Pressable
               key={option.value}
               accessibilityRole="button"
               onPress={() => {
                 onChange(option.value);
                 setOpen(false);
+                setFilter('');
               }}
               style={({ pressed }) => [
                 styles.option,
@@ -314,6 +337,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   option: { paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  search: {
+    minHeight: 44,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    fontSize: 16,
+    color: colors.text,
+  },
   optionSelected: { backgroundColor: colors.successBackground },
   error: { color: colors.danger },
   empty: { paddingVertical: spacing.xxl, alignItems: 'center' },

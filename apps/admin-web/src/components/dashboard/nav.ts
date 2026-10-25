@@ -10,6 +10,8 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', labelKey: 'nav.dashboard' },
   { href: '/shipments', labelKey: 'nav.shipments', roles: SHIPMENT_VIEWER_ROLES },
+  { href: '/pricing', labelKey: 'nav.pricing', roles: SHIPMENT_VIEWER_ROLES },
+  { href: '/zones', labelKey: 'nav.zones', roles: SHIPMENT_VIEWER_ROLES },
   { href: '/users', labelKey: 'nav.users', roles: ['SUPER_ADMIN'] },
   { href: '/settings', labelKey: 'nav.settings' },
 ];

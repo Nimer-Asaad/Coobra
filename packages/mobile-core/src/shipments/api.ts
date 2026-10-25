@@ -1,14 +1,18 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CreateShipmentInput,
+  MeResponse,
   Paginated,
+  PricingQuote,
   ShipmentDetails,
   ShipmentListItem,
   ShipmentStatus,
   TransitionShipmentRequest,
+  ZoneItem,
 } from '@coobra/shared';
 import { useApi } from '../api-context';
 import { useMobileConfig } from '../config';
+import { useSessionStore } from '../state/session-store';
 
 const PAGE_SIZE = 20;
 
@@ -86,6 +90,36 @@ export function useShipmentTransition(id: string) {
     onError: () => {
       // Someone else may have changed the shipment: show the latest state.
       void queryClient.invalidateQueries({ queryKey: ['shipments', clientApp, 'detail', id] });
+    },
+  });
+}
+
+/** Active zones (destinations and pickup areas). Rarely changes, so cached for 10 minutes. */
+export function useZones() {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['zones'],
+    queryFn: () => api.request<ZoneItem[]>('/v1/zones'),
+    staleTime: 10 * 60_000,
+  });
+}
+
+/** A single-use merchant quote; pass its id when creating the shipment. */
+export function useQuote() {
+  const api = useApi();
+  return useMutation({
+    mutationFn: (input: { destinationZoneId: string; originZoneId?: string }) =>
+      api.request<PricingQuote>('/v1/merchant/pricing/quote', { method: 'POST', body: input }),
+  });
+}
+
+export function useSetPickupZone() {
+  const api = useApi();
+  return useMutation({
+    mutationFn: async (zoneId: string) => {
+      await api.request<void>('/v1/merchant/pickup-zone', { method: 'PUT', body: { zoneId } });
+      const { user } = await api.request<MeResponse>('/v1/auth/me');
+      useSessionStore.getState().setUser(user);
     },
   });
 }

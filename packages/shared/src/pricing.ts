@@ -168,6 +168,41 @@ export const pickupZoneSchema = z.object({
 });
 export type PickupZoneInput = z.infer<typeof pickupZoneSchema>;
 
+export interface ZoneOption {
+  id: string;
+  label: string;
+  path: string;
+  depth: number;
+  active: boolean;
+}
+
+/** Depth-first, sorted zone tree flattened for selects, with "Parent / Child" paths. */
+export function zoneOptions(zones: ZoneItem[], language: string): ZoneOption[] {
+  const name = (zone: ZoneItem) => (language === 'ar' ? zone.nameAr : zone.nameEn);
+  const children = new Map<string | null, ZoneItem[]>();
+  for (const zone of zones) {
+    const list = children.get(zone.parentId) ?? [];
+    list.push(zone);
+    children.set(zone.parentId, list);
+  }
+  const ids = new Set(zones.map((zone) => zone.id));
+  const result: ZoneOption[] = [];
+  const visit = (parentId: string | null, prefix: string, inactiveAncestor: boolean) => {
+    const list = (children.get(parentId) ?? []).sort(
+      (a, b) => a.sortOrder - b.sortOrder || name(a).localeCompare(name(b)),
+    );
+    for (const zone of list) {
+      const path = prefix ? `${prefix} / ${name(zone)}` : name(zone);
+      const active = zone.active && !inactiveAncestor;
+      result.push({ id: zone.id, label: name(zone), path, depth: zone.depth, active });
+      visit(zone.id, path, !active);
+    }
+  };
+  visit(null, '', false);
+  // Orphans (parent filtered out) are not shown: they are not usable.
+  return result.filter((option) => ids.has(option.id));
+}
+
 // ---------------------------------------------------------------------------
 // API types
 // ---------------------------------------------------------------------------

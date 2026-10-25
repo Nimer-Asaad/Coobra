@@ -1,15 +1,20 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createShipmentSchema, GOVERNORATES, type Governorate } from '@coobra/shared';
+import { createShipmentSchema, zoneOptions } from '@coobra/shared';
+import { ApiError } from '../api-client';
 import { useFormErrors } from '../form-errors';
+import { useSessionStore } from '../state/session-store';
 import { AppButton } from '../ui/button';
 import { Banner } from '../ui/banner';
 import { ErrorBanner } from '../ui/error-banner';
 import { Screen } from '../ui/screen';
+import { AppText } from '../ui/text';
 import { TextField } from '../ui/text-field';
-import { useCreateShipment } from './api';
-import { ChoiceField } from './components';
+import { useDirection } from '../ui/use-direction';
+import { useCreateShipment, useQuote, useSetPickupZone, useZones } from './api';
+import { ChoiceField, Section } from './components';
+import { formatDateTime, formatMoney } from './format';
 
 const EMPTY = {
   recipientName: '',
@@ -23,32 +28,82 @@ const EMPTY = {
   codAmount: '',
 };
 
-/** Merchant shipment entry, optimised for adding several shipments in a row. */
+/**
+ * Merchant shipment entry, optimised for adding several shipments in a row. The delivery fee
+ * comes from a server quote that is re-checked when the shipment is created.
+ */
 export function CreateShipmentScreen() {
   const { t } = useTranslation();
+  const { language } = useDirection();
+  const pickupZoneId = useSessionStore((state) => state.user?.merchant?.pickupZoneId ?? null);
   const [form, setForm] = useState(EMPTY);
-  const [governorate, setGovernorate] = useState<Governorate | ''>('');
+  const [destinationZoneId, setDestinationZoneId] = useState('');
   const [created, setCreated] = useState<string | null>(null);
   const { fieldErrors, validate, applyApiError } = useFormErrors();
+  const zones = useZones();
+  const quote = useQuote();
   const create = useCreateShipment();
+  const setPickup = useSetPickupZone();
+  const options = zoneOptions(zones.data ?? [], language)
+    .filter((option) => option.active)
+    .map((option) => ({ value: option.id, label: option.path }));
   const update = (key: keyof typeof EMPTY) => (value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
 
+  const requestQuote = quote.mutate;
+  useEffect(() => {
+    if (destinationZoneId && pickupZoneId) requestQuote({ destinationZoneId });
+  }, [destinationZoneId, pickupZoneId, requestQuote]);
+
   function submit(addAnother: boolean) {
-    const values = validate(createShipmentSchema, { ...form, governorate });
+    const values = validate(createShipmentSchema, {
+      ...form,
+      destinationZoneId,
+      quoteId: quote.data?.quoteId ?? undefined,
+    });
     if (!values) return;
     create.mutate(values, {
-      onError: applyApiError,
+      onError: (error) => {
+        applyApiError(error);
+        // The price moved or the quote expired: fetch a fresh one for the merchant to confirm.
+        if (
+          error instanceof ApiError &&
+          ['PRICE_CHANGED', 'QUOTE_INVALID'].includes(error.body.code) &&
+          destinationZoneId
+        ) {
+          requestQuote({ destinationZoneId });
+        }
+      },
       onSuccess: (shipment) => {
         if (addAnother) {
-          // Keep the governorate and city: consecutive shipments often go to the same area.
+          // Keep the area and city: consecutive shipments often go to the same place.
           setForm((current) => ({ ...EMPTY, city: current.city }));
           setCreated(shipment.trackingNumber);
+          requestQuote({ destinationZoneId });
         } else {
           router.replace({ pathname: '/shipments/[id]', params: { id: shipment.id } });
         }
       },
     });
+  }
+
+  if (!pickupZoneId) {
+    return (
+      <Screen>
+        <Banner message={t('errors.ORIGIN_ZONE_REQUIRED')} />
+        <ChoiceField
+          label={t('pricing.pickupTitle')}
+          placeholder={t('zones.choose')}
+          searchPlaceholder={t('zones.search')}
+          options={options}
+          value=""
+          onChange={(zoneId) => setPickup.mutate(zoneId)}
+          testID="pickup-zone"
+        />
+        <AppText variant="muted">{t('pricing.pickupHint')}</AppText>
+        <ErrorBanner error={setPickup.error ?? zones.error} />
+      </Screen>
+    );
   }
 
   return (
@@ -83,14 +138,38 @@ export function CreateShipmentScreen() {
         error={fieldErrors.recipientPhoneAlt}
       />
       <ChoiceField
-        label={t('shipments.fields.governorate')}
-        placeholder={t('shipments.fields.chooseGovernorate')}
-        options={GOVERNORATES.map((code) => ({ value: code, label: t(`governorates.${code}`) }))}
-        value={governorate}
-        onChange={setGovernorate}
-        error={fieldErrors.governorate}
-        testID="shipment-governorate"
+        label={t('shipments.fields.destinationZone')}
+        placeholder={t('zones.choose')}
+        searchPlaceholder={t('zones.search')}
+        options={options}
+        value={destinationZoneId}
+        onChange={setDestinationZoneId}
+        error={fieldErrors.destinationZoneId}
+        testID="shipment-destination"
       />
+      <Section>
+        <AppText variant="label">{t('pricing.estimated')}</AppText>
+        {!destinationZoneId ? (
+          <AppText variant="muted">{t('pricing.chooseDestination')}</AppText>
+        ) : quote.isPending ? (
+          <AppText variant="muted">{t('pricing.calculating')}</AppText>
+        ) : quote.data ? (
+          <>
+            <AppText variant="title" testID="quote-fee">
+              {formatMoney(quote.data.finalFee, language)}
+            </AppText>
+            {quote.data.expiresAt ? (
+              <AppText variant="muted">
+                {t('pricing.estimatedHint', {
+                  time: formatDateTime(quote.data.expiresAt, language),
+                })}
+              </AppText>
+            ) : null}
+          </>
+        ) : (
+          <ErrorBanner error={quote.error} />
+        )}
+      </Section>
       <TextField
         label={t('shipments.fields.city')}
         value={form.city}
@@ -140,13 +219,14 @@ export function CreateShipmentScreen() {
         title={t('shipments.createSubmit')}
         onPress={() => submit(false)}
         loading={create.isPending}
+        disabled={!quote.data}
         testID="shipment-submit"
       />
       <AppButton
         variant="outline"
         title={t('shipments.createAnother')}
         onPress={() => submit(true)}
-        disabled={create.isPending}
+        disabled={create.isPending || !quote.data}
         testID="shipment-submit-another"
       />
     </Screen>
