@@ -1,5 +1,6 @@
-// COOBRA — Phase 1 schema: authentication and users only.
-// Shipment and accounting models are intentionally not part of this phase.
+// COOBRA schema.
+// Phase 1: authentication and users. Phase 2: shipments, status history, COD collection records.
+// Financial settlements, payouts and accounting ledgers are intentionally not modelled yet.
 
 generator client {
   provider            = "prisma-client"
@@ -60,13 +61,19 @@ model User {
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")
 
-  createdBy         User?            @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdUsers      User[]           @relation("UserCreatedBy")
+  createdBy         User?                   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers      User[]                  @relation("UserCreatedBy")
   merchantProfile   MerchantProfile?
   sessions          Session[]
   authTokens        AuthToken[]
-  auditLogsAsActor  AuditLog[]       @relation("AuditActor")
-  auditLogsAsTarget AuditLog[]       @relation("AuditTarget")
+  auditLogsAsActor  AuditLog[]              @relation("AuditActor")
+  auditLogsAsTarget AuditLog[]              @relation("AuditTarget")
+  merchantShipments Shipment[]              @relation("ShipmentMerchant")
+  createdShipments  Shipment[]              @relation("ShipmentCreator")
+  driverShipments   Shipment[]              @relation("ShipmentDriver")
+  statusChanges     ShipmentStatusHistory[] @relation("ShipmentHistoryActor")
+  historyAsDriver   ShipmentStatusHistory[] @relation("ShipmentHistoryDriver")
+  codCollections    CodCollection[]         @relation("CodCollectionDriver")
 
   @@index([role])
   @@map("users")
@@ -139,4 +146,122 @@ model AuditLog {
   @@index([targetUserId])
   @@index([action, createdAt])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — shipments
+// ---------------------------------------------------------------------------
+
+enum ShipmentStatus {
+  CREATED
+  ASSIGNED
+  PICKED_UP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  DELIVERY_FAILED
+  RETURN_REQUESTED
+  RETURNED
+  CANCELLED
+}
+
+enum Currency {
+  ILS
+}
+
+/// A parcel to deliver. Always owned by a merchant; creator and every status change are recorded.
+/// Money is stored as DECIMAL(12,2), never as floating point.
+model Shipment {
+  id                 String         @id @default(uuid(7)) @db.Uuid
+  /// Human-readable, unique tracking number (e.g. CB-48213907).
+  trackingNumber     String         @unique @map("tracking_number")
+  merchantId         String         @map("merchant_id") @db.Uuid
+  /// The real user who created the shipment (the merchant, or a staff member on their behalf).
+  createdById        String?        @map("created_by_id") @db.Uuid
+  creatorRole        UserRole       @map("creator_role")
+  recipientName      String         @map("recipient_name")
+  /// Normalised: local (0599…) or E.164 (+970599…).
+  recipientPhone     String         @map("recipient_phone")
+  recipientPhoneAlt  String?        @map("recipient_phone_alt")
+  /// Governorate code from @coobra/shared GOVERNORATES (validated by the API).
+  governorate        String
+  city               String
+  addressLine        String         @map("address_line")
+  landmark           String?
+  recipientNotes     String?        @map("recipient_notes")
+  merchantNotes      String?        @map("merchant_notes")
+  codAmount          Decimal        @map("cod_amount") @db.Decimal(12, 2)
+  /// Null until priced (merchant-created shipments).
+  deliveryFee        Decimal?       @map("delivery_fee") @db.Decimal(12, 2)
+  currency           Currency       @default(ILS)
+  status             ShipmentStatus @default(CREATED)
+  driverId           String?        @map("driver_id") @db.Uuid
+  assignedAt         DateTime?      @map("assigned_at")
+  pickedUpAt         DateTime?      @map("picked_up_at")
+  deliveredAt        DateTime?      @map("delivered_at")
+  deliveredById      String?        @map("delivered_by_id") @db.Uuid
+  deliveryAttempts   Int            @default(0) @map("delivery_attempts")
+  failureReason      String?        @map("failure_reason")
+  cancellationReason String?        @map("cancellation_reason")
+  returnReason       String?        @map("return_reason")
+  /// Optimistic concurrency token, incremented on every change.
+  version            Int            @default(0)
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  merchant       User                    @relation("ShipmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  createdBy      User?                   @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  driver         User?                   @relation("ShipmentDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  history        ShipmentStatusHistory[]
+  codCollections CodCollection[]
+
+  @@index([merchantId, createdAt(sort: Desc)])
+  @@index([driverId, status])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([governorate])
+  @@index([recipientPhone])
+  @@index([createdAt(sort: Desc)])
+  @@map("shipments")
+}
+
+/// Append-only record of every status change and (re)assignment.
+model ShipmentStatusHistory {
+  id          String          @id @default(uuid(7)) @db.Uuid
+  shipmentId  String          @map("shipment_id") @db.Uuid
+  fromStatus  ShipmentStatus? @map("from_status")
+  toStatus    ShipmentStatus  @map("to_status")
+  /// The real human who acted (never an impersonated identity).
+  actorUserId String?         @map("actor_user_id") @db.Uuid
+  actorRole   UserRole        @map("actor_role")
+  /// For assignment entries: the driver assigned.
+  driverId    String?         @map("driver_id") @db.Uuid
+  note        String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  actor    User?    @relation("ShipmentHistoryActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  driver   User?    @relation("ShipmentHistoryDriver", fields: [driverId], references: [id], onDelete: SetNull)
+
+  @@index([shipmentId, createdAt])
+  @@index([actorUserId])
+  @@map("shipment_status_history")
+}
+
+/// Operational record of cash on delivery reported by the driver when a shipment is delivered.
+/// Not a ledger: Phase 3 reconciliation and settlements will reference these rows.
+model CodCollection {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  shipmentId      String   @map("shipment_id") @db.Uuid
+  driverId        String   @map("driver_id") @db.Uuid
+  collected       Boolean
+  expectedAmount  Decimal  @map("expected_amount") @db.Decimal(12, 2)
+  collectedAmount Decimal  @map("collected_amount") @db.Decimal(12, 2)
+  currency        Currency @default(ILS)
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  driver   User     @relation("CodCollectionDriver", fields: [driverId], references: [id], onDelete: Restrict)
+
+  @@index([shipmentId])
+  @@index([driverId, recordedAt])
+  @@map("cod_collections")
 }

@@ -1,5 +1,8 @@
 import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import type { Server } from 'node:http';
+import { clientAppForRole, type UserRole } from '@coobra/shared';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { PrismaClient } from '@coobra/database';
 import { AppModule } from '../src/app.module.js';
@@ -74,7 +77,7 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
 
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE audit_logs, auth_tokens, sessions, merchant_profiles, users CASCADE',
+    'TRUNCATE TABLE cod_collections, shipment_status_history, shipments, audit_logs, auth_tokens, sessions, merchant_profiles, users CASCADE',
   );
 }
 
@@ -90,4 +93,43 @@ export async function createSuperAdmin(prisma: PrismaClient, email: string, pass
       emailVerifiedAt: new Date(),
     },
   });
+}
+
+export interface TestUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  token: string;
+}
+
+const TEST_PASSWORD = 'test-password-123';
+let passwordHash: string | undefined;
+
+/** Inserts an active, verified user of any role and signs them in to their app (Bearer token). */
+export async function createSignedInUser(
+  ctx: TestContext,
+  role: UserRole,
+  email: string,
+  extra: { fullName?: string; businessName?: string; phone?: string } = {},
+): Promise<TestUser> {
+  passwordHash ??= await new PasswordService().hash(TEST_PASSWORD);
+  const user = await ctx.prisma.user.create({
+    data: {
+      email,
+      fullName: extra.fullName ?? `Test ${role}`,
+      phone: extra.phone ?? null,
+      role,
+      language: 'en',
+      passwordHash,
+      emailVerifiedAt: new Date(),
+      ...(role === 'MERCHANT'
+        ? { merchantProfile: { create: { businessName: extra.businessName ?? `${email} store` } } }
+        : {}),
+    },
+  });
+  const res = await request(ctx.app.getHttpServer() as Server)
+    .post('/v1/auth/login')
+    .send({ email, password: TEST_PASSWORD, clientApp: clientAppForRole(role) })
+    .expect(200);
+  return { id: user.id, email, role, token: res.body.token as string };
 }

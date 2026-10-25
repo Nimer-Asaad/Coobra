@@ -64,4 +64,35 @@ export const Errors = {
     new AppException(HttpStatus.FORBIDDEN, 'CSRF_ORIGIN_REJECTED', 'Request origin is not allowed'),
   validation: (fieldErrors: Record<string, string>) =>
     new AppException(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', 'Validation failed', fieldErrors),
+  notFound: () => new AppException(HttpStatus.NOT_FOUND, 'NOT_FOUND', 'Not found'),
+  shipmentInvalidTransition: () =>
+    new AppException(
+      HttpStatus.CONFLICT,
+      'SHIPMENT_INVALID_TRANSITION',
+      'This status change is not allowed from the current status',
+    ),
+  shipmentConcurrentUpdate: () =>
+    new AppException(
+      HttpStatus.CONFLICT,
+      'SHIPMENT_CONCURRENT_UPDATE',
+      'The shipment was changed by someone else; reload and try again',
+    ),
+  shipmentMerchantInvalid: () =>
+    new AppException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'SHIPMENT_MERCHANT_INVALID',
+      'Merchant does not exist or is not active',
+    ),
+  shipmentDriverInvalid: () =>
+    new AppException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'SHIPMENT_DRIVER_INVALID',
+      'Driver does not exist or is not active',
+    ),
+  shipmentCodMismatch: () =>
+    new AppException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'SHIPMENT_COD_MISMATCH',
+      'Collected amount does not match the expected cash on delivery',
+    ),
 };
