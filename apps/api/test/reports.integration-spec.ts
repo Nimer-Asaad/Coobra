@@ -154,6 +154,17 @@ describe('Finance reports, reconciliation and Phase 2 backfill (PostgreSQL integ
     });
     expect(await ctx.prisma.journalEntry.count()).toBe(0);
 
+    // Unposted legacy cash is not custody yet: it can be neither declared nor cleared.
+    const before = await api(driver).get('/v1/driver/finance').expect(200);
+    expect(before.body).toMatchObject({ custody: '0.00', uncleared: [] });
+    expect(
+      (
+        await api(driver)
+          .post('/v1/driver/finance/settlements', { declaredAmount: '150' }, newKey())
+          .expect(422)
+      ).body.code,
+    ).toBe('INSUFFICIENT_FUNDS');
+
     const dryRun = await runPhase2Backfill(ctx.prisma, { execute: false });
     expect(dryRun).toMatchObject({
       executed: false,
@@ -167,6 +178,13 @@ describe('Finance reports, reconciliation and Phase 2 backfill (PostgreSQL integ
     expect(await ctx.prisma.journalEntry.count({ where: { kind: 'PHASE2_BACKFILL' } })).toBe(2);
     expect(await ledgerBalance(ctx.prisma, `DRIVER_CUSTODY:${driver.id}`)).toBe('150.00');
     expect(await ledgerBalance(ctx.prisma, `MERCHANT_BALANCE:${merchant.id}`)).toBe('-15.00');
+
+    const after = await api(driver).get('/v1/driver/finance').expect(200);
+    expect(after.body.custody).toBe('150.00');
+    expect(after.body.uncleared).toHaveLength(1);
+    await api(driver)
+      .post('/v1/driver/finance/settlements', { declaredAmount: '150' }, newKey())
+      .expect(201);
 
     // A second run finds nothing left: no double counting.
     const again = await runPhase2Backfill(ctx.prisma, { execute: true });

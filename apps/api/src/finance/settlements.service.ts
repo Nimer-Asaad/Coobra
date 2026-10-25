@@ -118,11 +118,17 @@ export class SettlementsService {
     if (!driver) throw Errors.shipmentDriverInvalid();
   }
 
-  /** Sum of collected cash not yet handed over or resolved (the driver's custody). */
+  /**
+   * Sum of collected cash not yet handed over or resolved (the driver's custody). Only
+   * collections posted to the ledger count: Phase 2 records join once the backfill posts them.
+   */
   private async uncleared(db: Tx, driverId: string): Promise<Prisma.Decimal> {
     const rows = await db.$queryRaw<{ total: string | null }[]>`
-      SELECT SUM(collected_amount - cleared_amount)::text AS total
-      FROM cod_collections WHERE driver_id = ${driverId}::uuid`;
+      SELECT SUM(c.collected_amount - c.cleared_amount)::text AS total
+      FROM cod_collections c
+      WHERE c.driver_id = ${driverId}::uuid
+        AND EXISTS (SELECT 1 FROM journal_entries e
+                    WHERE e.source_type = 'cod_collection' AND e.source_id = c.id::text)`;
     return decimal(rows[0]?.total ?? 0);
   }
 
@@ -140,6 +146,8 @@ export class SettlementsService {
           FROM cod_collections c JOIN shipments s ON s.id = c.shipment_id
           WHERE c.driver_id = ${driverId}::uuid AND c.cleared_amount < c.collected_amount
             AND c.shipment_id = ANY(${shipmentIds}::uuid[])
+            AND EXISTS (SELECT 1 FROM journal_entries e
+                        WHERE e.source_type = 'cod_collection' AND e.source_id = c.id::text)
           ORDER BY c.recorded_at, c.id FOR UPDATE OF c`
       : await tx.$queryRaw<
           { id: string; shipment_id: string; merchant_id: string; remaining: string }[]
@@ -147,6 +155,8 @@ export class SettlementsService {
           SELECT c.id, c.shipment_id, s.merchant_id, (c.collected_amount - c.cleared_amount)::text AS remaining
           FROM cod_collections c JOIN shipments s ON s.id = c.shipment_id
           WHERE c.driver_id = ${driverId}::uuid AND c.cleared_amount < c.collected_amount
+            AND EXISTS (SELECT 1 FROM journal_entries e
+                        WHERE e.source_type = 'cod_collection' AND e.source_id = c.id::text)
           ORDER BY c.recorded_at, c.id FOR UPDATE OF c`;
     let left = amount;
     const allocations: Allocation[] = [];
@@ -512,11 +522,21 @@ export class SettlementsService {
 
   async driverSummary(driverId: string): Promise<DriverFinanceSummary> {
     const db = this.prisma.client;
-    const collections = await db.codCollection.findMany({
+    const all = await db.codCollection.findMany({
       where: { driverId, collectedAmount: { gt: 0 } },
       include: { shipment: { select: { id: true, trackingNumber: true } } },
       orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }],
     });
+    // Same rule as custody: only collections already posted to the ledger.
+    const posted = new Set(
+      (
+        await db.journalEntry.findMany({
+          where: { sourceType: 'cod_collection', sourceId: { in: all.map((c) => c.id) } },
+          select: { sourceId: true },
+        })
+      ).map((entry) => entry.sourceId),
+    );
+    const collections = all.filter((collection) => posted.has(collection.id));
     const uncleared: UnclearedCollection[] = collections
       .filter((collection) => collection.clearedAmount.lessThan(collection.collectedAmount))
       .map((collection) => ({
