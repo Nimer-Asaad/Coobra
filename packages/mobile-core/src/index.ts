@@ -15,3 +15,4 @@ export { applyDirection, textAlignFor } from './direction';
 export { ShipmentsListScreen } from './shipments/list-screen';
 export { CreateShipmentScreen } from './shipments/create-screen';
 export { ShipmentDetailsScreen } from './shipments/details-screen';
+export { FinanceScreen } from './shipments/finance-screen';

@@ -16,6 +16,9 @@ const STATUS_COLORS: Record<ShipmentStatus, { background: string; text: string }
   DELIVERED: { background: '#d1fae5', text: '#064e3b' },
   DELIVERY_FAILED: { background: '#fee2e2', text: '#7f1d1d' },
   RETURN_REQUESTED: { background: '#ffedd5', text: '#7c2d12' },
+  RETURN_APPROVED: { background: '#ffedd5', text: '#7c2d12' },
+  RETURN_IN_TRANSIT: { background: '#fed7aa', text: '#7c2d12' },
+  RETURNED_TO_HUB: { background: '#f3e8ff', text: '#581c87' },
   RETURNED: { background: '#e4e4e7', text: '#27272a' },
   CANCELLED: { background: '#f4f4f5', text: '#71717a' },
 };

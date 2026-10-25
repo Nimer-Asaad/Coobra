@@ -50,6 +50,10 @@ export function ProtectedGroupLayout() {
         name="shipments/[id]"
         options={{ title: t('shipments.fields.trackingNumber') }}
       />
+      <Stack.Screen
+        name="finance"
+        options={{ title: clientApp === 'MERCHANT_APP' ? t('nav.myBalance') : t('nav.myCash') }}
+      />
     </Stack>
   );
 }

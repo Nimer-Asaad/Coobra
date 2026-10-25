@@ -31,6 +31,12 @@ export function HomeScreen() {
           onPress={() => router.push('/shipments')}
           testID="home-shipments"
         />
+        <AppButton
+          variant="outline"
+          title={clientApp === 'MERCHANT_APP' ? t('nav.myBalance') : t('nav.myCash')}
+          onPress={() => router.push('/finance')}
+          testID="home-finance"
+        />
       </View>
       <View style={styles.card}>
         <AppText variant="muted">{t('home.roleLabel')}</AppText>

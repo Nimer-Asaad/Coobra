@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 import {
   availableShipmentTransitions,
+  normalizeMoney,
   type ShipmentActor,
   type ShipmentDetails,
   type ShipmentTransitionRule,
@@ -19,6 +20,7 @@ import { TextField } from '../ui/text-field';
 import { colors, radius, spacing } from '../ui/theme';
 import { useDirection } from '../ui/use-direction';
 import { useShipment, useShipmentTransition } from './api';
+import { useFollowUpCollection } from './finance-api';
 import { InfoRow, Row, Section, StatusBadge, Timeline } from './components';
 import { formatDateTime, formatMoney, zoneText } from './format';
 
@@ -147,6 +149,20 @@ export function ShipmentDetailsScreen() {
               : t('shipments.fields.deliveryFeePending')
           }
         />
+        {s.codInfo.status !== 'NOT_REQUIRED' ? (
+          <InfoRow
+            label={t('finance.cod.title')}
+            value={`${t(`finance.cod.status.${s.codInfo.status}`)} · ${formatMoney(s.codInfo.collected, language)}`}
+          />
+        ) : null}
+        {s.codInfo.status === 'PARTIAL' ? (
+          <AppText style={styles.warning}>
+            {t('finance.cod.remaining', { amount: formatMoney(s.codInfo.outstanding, language) })}
+          </AppText>
+        ) : null}
+        {actor === 'DRIVER' && s.status === 'DELIVERED' && s.codInfo.status === 'PARTIAL' ? (
+          <FollowUpCollection shipmentId={s.id} />
+        ) : null}
         {s.cod ? (
           <InfoRow
             label={t('shipments.details.cod')}
@@ -219,6 +235,23 @@ export function ShipmentDetailsScreen() {
               onDone={() => setMessage(t('shipments.actions.updated'))}
             />
           ))}
+        </Section>
+      ) : null}
+
+      {s.returnInfo ? (
+        <Section title={t('returns.info')}>
+          {s.returnInfo.requestReason ? (
+            <InfoRow label={t('returns.requestReason')} value={s.returnInfo.requestReason} />
+          ) : null}
+          <InfoRow
+            label={t('returns.fee')}
+            value={`${t(`returns.feeStatus.${s.returnInfo.feeStatus}`)}${
+              s.returnInfo.feeAmount ? ` · ${formatMoney(s.returnInfo.feeAmount, language)}` : ''
+            }`}
+          />
+          {s.returnInfo.returnDriver ? (
+            <InfoRow label={t('returns.returnDriver')} value={s.returnInfo.returnDriver.fullName} />
+          ) : null}
         </Section>
       ) : null}
 
@@ -322,17 +355,33 @@ function DeliverPanel({
   shipment: ShipmentDetails;
   loading: boolean;
   error: unknown;
-  onSubmit: (cod: { collected: boolean; amount: string; confirmed: true }) => void;
+  onSubmit: (cod: {
+    collected: boolean;
+    amount: string;
+    confirmed: true;
+    partialReason?: string;
+  }) => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
   const { language } = useDirection();
-  const hasCod = Number(shipment.codAmount) > 0;
+  const hasCod = shipment.codAmount !== '0.00';
   const [collected, setCollected] = useState<boolean | null>(hasCod ? null : false);
   const [amount, setAmount] = useState('');
+  const [partialReason, setPartialReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const expected = formatMoney(shipment.codAmount, language);
-  const ready = confirmed && (hasCod ? collected === true && amount.trim() !== '' : true);
+  // Exact comparison in cents (never floating point); the server re-validates everything.
+  const typed = toCents(amount);
+  const partial = typed !== null && typed > 0n && typed < (toCents(shipment.codAmount) ?? 0n);
+  const ready =
+    confirmed &&
+    (hasCod
+      ? collected === true &&
+        typed !== null &&
+        typed > 0n &&
+        (!partial || partialReason.trim().length >= 3)
+      : true);
 
   return (
     <View style={styles.panel}>
@@ -364,6 +413,18 @@ function DeliverPanel({
               testID="cod-amount"
             />
           ) : null}
+          {collected === true && partial ? (
+            <>
+              <Banner message={t('finance.cod.partial')} />
+              <TextField
+                label={t('finance.cod.partialReason')}
+                value={partialReason}
+                onChangeText={setPartialReason}
+                multiline
+                testID="cod-partial-reason"
+              />
+            </>
+          ) : null}
           {collected === false ? <Banner message={t('shipments.deliver.mustCollect')} /> : null}
         </>
       ) : (
@@ -386,6 +447,7 @@ function DeliverPanel({
             collected: collected === true,
             amount: collected === true ? amount : '0',
             confirmed: true,
+            ...(partial ? { partialReason: partialReason.trim() } : {}),
           })
         }
         testID="deliver-submit"
@@ -424,8 +486,42 @@ function Choice({
   );
 }
 
+/** "12.50" → 1250n; null when not a valid amount. */
+function toCents(value: string): bigint | null {
+  const normalized = normalizeMoney(value);
+  return normalized === null ? null : BigInt(normalized.replace('.', ''));
+}
+
+/** A later cash payment on a partially paid shipment. */
+function FollowUpCollection({ shipmentId }: { shipmentId: string }) {
+  const { t } = useTranslation();
+  const [amount, setAmount] = useState('');
+  const collect = useFollowUpCollection(shipmentId);
+  return (
+    <View style={styles.panel}>
+      <TextField
+        label={t('finance.cod.collect')}
+        value={amount}
+        onChangeText={setAmount}
+        keyboardType="decimal-pad"
+        forceLtr
+        testID="followup-amount"
+      />
+      <ErrorBanner error={collect.error} />
+      <AppButton
+        title={t('finance.confirm')}
+        loading={collect.isPending}
+        disabled={!amount.trim()}
+        onPress={() => collect.mutate({ amount }, { onSuccess: () => setAmount('') })}
+        testID="followup-submit"
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   loading: { marginTop: spacing.xxl },
+  warning: { color: colors.danger, fontWeight: '600' },
   ltr: { writingDirection: 'ltr' },
   buttons: { gap: spacing.sm },
   panel: {
