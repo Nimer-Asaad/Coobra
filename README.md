@@ -2,9 +2,11 @@
 
 Bilingual (Arabic / English) delivery management platform.
 
-**Phase 1 (this state of the repository): foundation only.** Monorepo, authentication,
-role-based authorization, bilingual UI with RTL/LTR, and the minimum user data model.
-There are no shipment, accounting or dashboard-analytics features yet.
+**Phase 1:** monorepo, authentication, role-based authorization, bilingual UI with RTL/LTR.
+**Phase 2:** shipments — creation by merchants and by operations staff on a merchant's behalf,
+controlled lifecycle with status history, driver assignment, delivery with cash-on-delivery
+confirmation, admin/merchant/driver screens. See [docs/shipments.md](docs/shipments.md).
+Settlements and accounting are not implemented yet.
 
 ## Applications and packages
 
@@ -90,5 +92,6 @@ pnpm format:check
 ## Documentation
 
 - [Architecture and authentication](docs/architecture.md)
+- [Shipments: roles, lifecycle, COD and API (Phase 2)](docs/shipments.md)
 - [Impersonation design (not implemented)](docs/impersonation.md)
 - [Git workflow and establishing `main`](docs/git-workflow.md)

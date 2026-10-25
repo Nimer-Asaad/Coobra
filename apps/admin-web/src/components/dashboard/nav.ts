@@ -1,4 +1,4 @@
-import type { UserRole } from '@coobra/shared';
+import { SHIPMENT_VIEWER_ROLES, type UserRole } from '@coobra/shared';
 
 export interface NavItem {
   href: string;
@@ -9,6 +9,7 @@ export interface NavItem {
 /** Navigation is filtered by role; the API enforces the same rules on every request. */
 export const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', labelKey: 'nav.dashboard' },
+  { href: '/shipments', labelKey: 'nav.shipments', roles: SHIPMENT_VIEWER_ROLES },
   { href: '/users', labelKey: 'nav.users', roles: ['SUPER_ADMIN'] },
   { href: '/settings', labelKey: 'nav.settings' },
 ];
