@@ -393,3 +393,73 @@ export interface MerchantFinanceSummary {
 export interface MerchantBalanceRow extends Omit<MerchantFinanceSummary, 'payouts'> {
   merchant: PersonRef & { businessName: string };
 }
+
+// ---------------------------------------------------------------------------
+// Reports and reconciliation
+// ---------------------------------------------------------------------------
+
+/** A ledger figure recomputed from operational records; `difference` must be "0.00". */
+export interface ReconciliationCheck {
+  key: 'TRIAL_BALANCE' | 'DRIVER_CUSTODY' | 'MERCHANT_COD_PENDING' | 'MERCHANT_PAYOUTS';
+  ledger: string;
+  operational: string;
+  difference: string;
+}
+
+export interface FinanceOverview {
+  companyCash: Record<CashChannel, string>;
+  driverCustody: string;
+  driverReceivables: string;
+  merchantPending: string;
+  /** Sum of positive merchant balances (owed to merchants). */
+  merchantOwed: string;
+  /** Sum of negative merchant balances (merchants owe the company). */
+  merchantOwing: string;
+  reservedPayouts: string;
+  /** COD still unpaid by recipients on partially paid shipments. */
+  recipientOutstanding: string;
+  period: {
+    from: string | null;
+    to: string | null;
+    deliveryFees: string;
+    returnFees: string;
+    codShortfallExpense: string;
+    driverCashLossExpense: string;
+    adjustmentExpense: string;
+  };
+  queues: {
+    shortfallsOpen: number;
+    settlementsSubmitted: number;
+    driverShortagesPending: number;
+    payoutsPending: number;
+    payoutsApproved: number;
+    adjustmentsPending: number;
+    feeCorrectionsPending: number;
+    returnsFeeUnconfigured: number;
+  };
+  reconciliation: ReconciliationCheck[];
+}
+
+export interface JournalEntryItem {
+  id: string;
+  kind: string;
+  description: string | null;
+  reversalOfId: string | null;
+  createdBy: PersonRef | null;
+  createdAt: string;
+  lines: {
+    account: string;
+    purpose: string;
+    side: 'DEBIT' | 'CREDIT';
+    amount: string;
+    trackingNumber: string | null;
+  }[];
+}
+
+export const CSV_REPORTS = [
+  'merchant-balances',
+  'driver-balances',
+  'journal',
+  'delivered-shipments',
+] as const;
+export type CsvReport = (typeof CSV_REPORTS)[number];

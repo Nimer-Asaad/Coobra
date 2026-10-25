@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:integration": "vitest run --config ./vitest.config.integration.ts",
-    "create-super-admin": "node dist/cli/create-super-admin.js"
+    "create-super-admin": "node dist/cli/create-super-admin.js",
+    "finance:backfill-phase2": "node dist/cli/finance-backfill-phase2.js"
   },
   "dependencies": {
     "@coobra/database": "workspace:*",
