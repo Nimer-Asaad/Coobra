@@ -9,6 +9,8 @@ import {
 } from './finance.controller.js';
 import { IdempotencyService } from './idempotency.service.js';
 import { LedgerService } from './ledger.service.js';
+import { AdminPayoutsController, MerchantPayoutsController } from './payouts.controller.js';
+import { PayoutsService } from './payouts.service.js';
 import {
   AdminSettlementsController,
   DriverSettlementsController,
@@ -22,6 +24,8 @@ import { SettlementsService } from './settlements.service.js';
     DriverFinanceController,
     AdminSettlementsController,
     DriverSettlementsController,
+    AdminPayoutsController,
+    MerchantPayoutsController,
   ],
   providers: [
     LedgerService,
@@ -30,6 +34,7 @@ import { SettlementsService } from './settlements.service.js';
     CodService,
     AdjustmentsService,
     SettlementsService,
+    PayoutsService,
   ],
   exports: [LedgerService, IdempotencyService, ApprovalService, CodService],
 })

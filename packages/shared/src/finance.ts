@@ -292,3 +292,104 @@ export interface DriverBalanceRow {
   receivable: string;
   pendingSettlement: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Merchant payouts, merchant payments and treasury transfers
+// ---------------------------------------------------------------------------
+
+export const PAYMENT_METHODS = ['CASH', 'BANK_TRANSFER', 'E_WALLET', 'CHEQUE'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export type PayoutStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'PAID' | 'CANCELLED';
+
+/** Where the money for each payout method comes from. */
+export const PAYMENT_METHOD_CHANNEL: Record<PaymentMethod, CashChannel> = {
+  CASH: 'HUB',
+  BANK_TRANSFER: 'BANK',
+  CHEQUE: 'BANK',
+  E_WALLET: 'EWALLET',
+};
+
+const method = z.enum(PAYMENT_METHODS, { error: 'validation.finance.method' });
+
+/** A merchant asks for a payout (finance decides). */
+export const payoutRequestSchema = z.object({
+  amount: moneySchema(1_000_000),
+  method,
+  note,
+});
+export type PayoutRequestInput = z.infer<typeof payoutRequestSchema>;
+
+/** A finance user creates a payout for a merchant (another person approves it). */
+export const createPayoutSchema = payoutRequestSchema.extend({
+  merchantId: z.uuid({ error: 'validation.merchant.required' }),
+});
+export type CreatePayoutInput = z.infer<typeof createPayoutSchema>;
+
+export const markPayoutPaidSchema = z.object({
+  reference: z
+    .string({ error: 'validation.finance.reference' })
+    .trim()
+    .min(2, { error: 'validation.finance.reference' })
+    .max(120, { error: 'validation.text.tooLong' }),
+  note,
+});
+export type MarkPayoutPaidInput = z.infer<typeof markPayoutPaidSchema>;
+
+export const merchantPaymentSchema = z.object({
+  merchantId: z.uuid({ error: 'validation.merchant.required' }),
+  amount: moneySchema(1_000_000),
+  channel: z.enum(CASH_CHANNELS, { error: 'validation.finance.method' }),
+  reference: z.string().trim().max(120).optional(),
+  note,
+});
+export type MerchantPaymentInput = z.infer<typeof merchantPaymentSchema>;
+
+export const treasuryTransferSchema = z
+  .object({
+    fromChannel: z.enum(CASH_CHANNELS, { error: 'validation.finance.method' }),
+    toChannel: z.enum(CASH_CHANNELS, { error: 'validation.finance.method' }),
+    amount: moneySchema(10_000_000),
+    reference: z.string().trim().max(120).optional(),
+  })
+  .refine((value) => value.fromChannel !== value.toChannel, {
+    path: ['toChannel'],
+    error: 'validation.finance.sameChannel',
+  });
+export type TreasuryTransferInput = z.infer<typeof treasuryTransferSchema>;
+
+export interface PayoutItem {
+  id: string;
+  merchant: PersonRef & { businessName: string };
+  amount: string;
+  method: PaymentMethod;
+  status: PayoutStatus;
+  requestedByMerchant: boolean;
+  note: string | null;
+  createdBy: PersonRef;
+  approvedBy: PersonRef | null;
+  approvedAt: string | null;
+  paidBy: PersonRef | null;
+  paidAt: string | null;
+  reference: string | null;
+  cancelledBy: PersonRef | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+}
+
+/**
+ * A merchant's money. `pending` is COD collected but not yet received from the driver;
+ * `balance` is funded (positive = owed to the merchant, negative = the merchant owes);
+ * `reserved` is approved but unpaid payouts; `available` = max(balance − reserved, 0).
+ */
+export interface MerchantFinanceSummary {
+  pending: string;
+  balance: string;
+  reserved: string;
+  available: string;
+  payouts: PayoutItem[];
+}
+
+export interface MerchantBalanceRow extends Omit<MerchantFinanceSummary, 'payouts'> {
+  merchant: PersonRef & { businessName: string };
+}

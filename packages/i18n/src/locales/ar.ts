@@ -419,6 +419,8 @@ export const ar: TranslationResource = {
       method: 'اختر طريقة الدفع.',
       reference: 'أدخل مرجع الدفع.',
       counted: 'يجب أن يكون المبلغ المعدود أكبر من صفر وألا يتجاوز المبلغ المصرّح به.',
+      sameChannel: 'اختر حسابين مختلفين.',
+      referenceTaken: 'مرجع الدفع هذا مستخدم من قبل.',
     },
   },
   errors: {
