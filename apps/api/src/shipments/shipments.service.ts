@@ -7,6 +7,7 @@ import {
   findShipmentTransition,
   normalizePhone,
   SHIPMENT_STATUSES,
+  SHIPMENT_VIEWER_ROLES,
   shipmentActorForRole,
   type AdminCreateShipmentInput,
   type CreateShipmentInput,
@@ -19,6 +20,7 @@ import {
   type ShipmentStatus,
   type ShipmentSummary,
   type TransitionShipmentInput,
+  type UserRole,
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
 import { isUniqueViolation } from '../auth/auth.service.js';
@@ -56,10 +58,12 @@ export class ShipmentsService {
     private readonly audit: AuditService,
   ) {}
 
+  /** Fails closed: only the staff viewer roles see every shipment. */
   private scopeFor(actor: Actor): Prisma.ShipmentWhereInput {
     if (actor.role === 'MERCHANT') return { merchantId: actor.id };
     if (actor.role === 'DRIVER') return { driverId: actor.id };
-    return {};
+    if ((SHIPMENT_VIEWER_ROLES as readonly UserRole[]).includes(actor.role)) return {};
+    throw Errors.forbidden();
   }
 
   async list(actor: Actor, query: ListShipmentsQuery): Promise<Paginated<ShipmentListItem>> {
