@@ -11,7 +11,7 @@ import {
   type ShipmentDetails,
   type ShipmentStatus,
   type ShipmentTransitionRule,
-  type TransitionShipmentInput,
+  type TransitionShipmentRequest,
 } from '@coobra/shared';
 import { translateValidation } from '@coobra/i18n';
 import { ErrorAlert } from '@/components/error-alert';
@@ -337,7 +337,7 @@ function TransitionForm({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const mutation = useMutation({
-    mutationFn: (body: TransitionShipmentInput) =>
+    mutationFn: (body: TransitionShipmentRequest) =>
       bff<ShipmentDetails>(`/v1/admin/shipments/${shipment.id}/transitions`, {
         method: 'POST',
         body,

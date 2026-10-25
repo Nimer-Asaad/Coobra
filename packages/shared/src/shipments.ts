@@ -321,6 +321,8 @@ export const transitionShipmentSchema = z.object({
   cod: codConfirmationSchema.optional(),
 });
 export type TransitionShipmentInput = z.infer<typeof transitionShipmentSchema>;
+/** What a client sends (optional fields may be omitted). */
+export type TransitionShipmentRequest = z.input<typeof transitionShipmentSchema>;
 
 export const SHIPMENT_PAGE_SIZE_MAX = 100;
 

@@ -1,5 +1,6 @@
 import { Redirect, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import { useMobileConfig } from './config';
 import { VerifyPendingScreen } from './screens/verify-pending-screen';
 import { useLanguageStore } from './state/language-store';
 import { useSessionStore } from './state/session-store';
@@ -24,6 +25,7 @@ export function AuthGroupLayout() {
 /** Layout for protected screens: requires a session and a verified email. */
 export function ProtectedGroupLayout() {
   const { t } = useTranslation();
+  const { clientApp } = useMobileConfig();
   const language = useLanguageStore((state) => state.language);
   const status = useSessionStore((state) => state.status);
   const emailVerified = useSessionStore((state) => state.user?.emailVerified ?? false);
@@ -35,6 +37,19 @@ export function ProtectedGroupLayout() {
     <Stack screenOptions={{ headerTitleAlign: 'center' }}>
       <Stack.Screen name="home" options={{ headerShown: false }} />
       <Stack.Screen name="settings" options={{ title: t('nav.settings') }} />
+      <Stack.Screen
+        name="shipments/index"
+        options={{
+          title: clientApp === 'MERCHANT_APP' ? t('shipments.myShipments') : t('shipments.title'),
+        }}
+      />
+      {clientApp === 'MERCHANT_APP' ? (
+        <Stack.Screen name="shipments/new" options={{ title: t('shipments.newShipment') }} />
+      ) : null}
+      <Stack.Screen
+        name="shipments/[id]"
+        options={{ title: t('shipments.fields.trackingNumber') }}
+      />
     </Stack>
   );
 }
