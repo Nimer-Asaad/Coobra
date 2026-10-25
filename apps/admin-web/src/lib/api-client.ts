@@ -1,4 +1,4 @@
-import { isApiErrorBody, type ApiErrorBody } from '@coobra/shared';
+import { IDEMPOTENCY_HEADER, isApiErrorBody, type ApiErrorBody } from '@coobra/shared';
 
 /** Error thrown by browser-side API calls; `body` carries the translatable error code. */
 export class ClientApiError extends Error {
@@ -13,11 +13,14 @@ export class ClientApiError extends Error {
  */
 export async function clientFetch<T>(
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; idempotencyKey?: string } = {},
 ): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (init.body !== undefined) headers['content-type'] = 'application/json';
+  if (init.idempotencyKey) headers[IDEMPOTENCY_HEADER] = init.idempotencyKey;
   const response = await fetch(path, {
     method: init.method ?? 'GET',
-    headers: init.body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
     credentials: 'same-origin',
   });
@@ -34,6 +37,14 @@ export async function clientFetch<T>(
 }
 
 /** Calls an API endpoint through the generic BFF proxy, e.g. `bff('/v1/admin/users')`. */
-export function bff<T>(apiPath: string, init?: { method?: string; body?: unknown }) {
+export function bff<T>(
+  apiPath: string,
+  init?: { method?: string; body?: unknown; idempotencyKey?: string },
+) {
   return clientFetch<T>(`/api/bff${apiPath}`, init);
+}
+
+/** A fresh key per user action; retries of the same action must reuse it. */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
 }

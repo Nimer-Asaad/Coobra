@@ -79,6 +79,16 @@ model User {
   pricingQuotes        PricingQuote[]          @relation("PricingQuoteMerchant")
   feeOverrides         ShipmentFeeOverride[]   @relation("FeeOverrideActor")
   approvedFeeOverrides ShipmentFeeOverride[]   @relation("FeeOverrideApprover")
+  financialAccounts    FinancialAccount[]      @relation("FinancialAccountOwner")
+  journalEntries       JournalEntry[]          @relation("JournalEntryCreator")
+  merchantShortfalls   CodShortfall[]          @relation("ShortfallMerchant")
+  driverShortfalls     CodShortfall[]          @relation("ShortfallDriver")
+  proposedShortfalls   CodShortfall[]          @relation("ShortfallProposer")
+  decidedShortfalls    CodShortfall[]          @relation("ShortfallDecider")
+  merchantAdjustments  FinancialAdjustment[]   @relation("AdjustmentMerchant")
+  requestedAdjustments FinancialAdjustment[]   @relation("AdjustmentRequester")
+  decidedAdjustments   FinancialAdjustment[]   @relation("AdjustmentDecider")
+  settingChanges       FinanceSettingChange[]  @relation("SettingChanger")
 
   @@index([role])
   @@map("users")
@@ -211,6 +221,9 @@ model Shipment {
   failureReason      String?        @map("failure_reason")
   cancellationReason String?        @map("cancellation_reason")
   returnReason       String?        @map("return_reason")
+  /// Phase 3: cash-on-delivery progress (separate from the delivery status).
+  codStatus          CodStatus      @default(PENDING) @map("cod_status")
+  codCollectedAmount Decimal        @default(0) @map("cod_collected_amount") @db.Decimal(12, 2)
   /// Phase 3: pricing zones (nullable for Phase 2 shipments).
   originZoneId       String?        @map("origin_zone_id") @db.Uuid
   destinationZoneId  String?        @map("destination_zone_id") @db.Uuid
@@ -229,6 +242,8 @@ model Shipment {
   pricing         ShipmentPricing?
   feeOverrides    ShipmentFeeOverride[]
   pricingQuote    PricingQuote?
+  shortfall       CodShortfall?
+  journalLines    JournalLine[]
 
   @@index([merchantId, createdAt(sort: Desc)])
   @@index([driverId, status])
@@ -274,6 +289,11 @@ model CodCollection {
   collectedAmount Decimal  @map("collected_amount") @db.Decimal(12, 2)
   currency        Currency @default(ILS)
   recordedAt      DateTime @default(now()) @map("recorded_at")
+  /// Phase 3: portion handed to the company (settlement) or resolved as a driver cash shortage.
+  clearedAmount   Decimal  @default(0) @map("cleared_amount") @db.Decimal(12, 2)
+  /// Phase 3: client-supplied key for follow-up collections (prevents double posting).
+  idempotencyKey  String?  @unique @map("idempotency_key")
+  note            String?
 
   shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
   driver   User     @relation("CodCollectionDriver", fields: [driverId], references: [id], onDelete: Restrict)
@@ -462,4 +482,240 @@ model ShipmentFeeOverride {
 
   @@index([shipmentId, createdAt])
   @@map("shipment_fee_overrides")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — ledger, COD shortfalls, adjustments and finance settings
+// ---------------------------------------------------------------------------
+
+enum CodStatus {
+  NOT_REQUIRED
+  PENDING
+  PARTIAL
+  COLLECTED
+  SHORTFALL_RESOLVED
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  REVENUE
+  EXPENSE
+}
+
+enum AccountPurpose {
+  COMPANY_CASH_HUB
+  COMPANY_BANK
+  COMPANY_EWALLET
+  DRIVER_CUSTODY
+  DRIVER_RECEIVABLE
+  MERCHANT_COD_PENDING
+  MERCHANT_BALANCE
+  DELIVERY_FEE_REVENUE
+  RETURN_FEE_REVENUE
+  COD_SHORTFALL_EXPENSE
+  DRIVER_CASH_LOSS_EXPENSE
+  ADJUSTMENT_EXPENSE
+}
+
+/// Ledger account. Company accounts have no owner; driver/merchant accounts one per person.
+model FinancialAccount {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  /// e.g. COMPANY_CASH_HUB or MERCHANT_BALANCE:<user id>
+  code        String         @unique
+  purpose     AccountPurpose
+  type        AccountType
+  ownerUserId String?        @map("owner_user_id") @db.Uuid
+  currency    Currency       @default(ILS)
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  owner User?         @relation("FinancialAccountOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  lines JournalLine[]
+
+  @@index([purpose])
+  @@map("financial_accounts")
+}
+
+enum JournalKind {
+  COD_COLLECTION
+  DELIVERY_FEE
+  RETURN_FEE
+  FEE_ADJUSTMENT
+  DRIVER_SETTLEMENT
+  DRIVER_CASH_SHORTAGE
+  DRIVER_REPAYMENT
+  COD_SHORTFALL
+  MERCHANT_PAYOUT
+  MERCHANT_PAYMENT
+  TREASURY_TRANSFER
+  MERCHANT_ADJUSTMENT
+  REVERSAL
+  PHASE2_BACKFILL
+}
+
+/// Immutable, balanced journal entry (enforced by database triggers).
+model JournalEntry {
+  id           String      @id @default(uuid(7)) @db.Uuid
+  kind         JournalKind
+  /// Business reference, unique per kind: one posting per source.
+  sourceType   String      @map("source_type")
+  sourceId     String      @map("source_id")
+  reversalOfId String?     @unique @map("reversal_of_id") @db.Uuid
+  description  String?
+  currency     Currency    @default(ILS)
+  createdById  String?     @map("created_by_id") @db.Uuid
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  createdBy  User?         @relation("JournalEntryCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reversalOf JournalEntry? @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy JournalEntry? @relation("JournalReversal")
+  lines      JournalLine[]
+
+  @@unique([kind, sourceType, sourceId])
+  @@index([createdAt])
+  @@map("journal_entries")
+}
+
+enum EntrySide {
+  DEBIT
+  CREDIT
+}
+
+model JournalLine {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  entryId    String    @map("entry_id") @db.Uuid
+  accountId  String    @map("account_id") @db.Uuid
+  side       EntrySide
+  amount     Decimal   @db.Decimal(14, 2)
+  shipmentId String?   @map("shipment_id") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  entry    JournalEntry     @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  account  FinancialAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  shipment Shipment?        @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt])
+  @@index([entryId])
+  @@index([shipmentId])
+  @@map("journal_lines")
+}
+
+enum ShortfallStatus {
+  OPEN
+  PENDING_APPROVAL
+  AWAITING_MERCHANT
+  RESOLVED
+}
+
+enum ShortfallResolution {
+  COLLECTED
+  COMPANY_ABSORBS
+  DRIVER_RESPONSIBLE
+  MERCHANT_ACCEPTS
+}
+
+/// A recipient paid less than the COD. Never assigned to the merchant automatically.
+model CodShortfall {
+  id                 String               @id @default(uuid(7)) @db.Uuid
+  shipmentId         String               @unique @map("shipment_id") @db.Uuid
+  merchantId         String               @map("merchant_id") @db.Uuid
+  driverId           String               @map("driver_id") @db.Uuid
+  expectedAmount     Decimal              @map("expected_amount") @db.Decimal(12, 2)
+  /// The driver's explanation at delivery.
+  reason             String
+  status             ShortfallStatus      @default(OPEN)
+  proposedResolution ShortfallResolution? @map("proposed_resolution")
+  proposedAmount     Decimal?             @map("proposed_amount") @db.Decimal(12, 2)
+  proposalNote       String?              @map("proposal_note")
+  proposedById       String?              @map("proposed_by_id") @db.Uuid
+  proposedAt         DateTime?            @map("proposed_at")
+  resolution         ShortfallResolution?
+  resolvedAmount     Decimal?             @map("resolved_amount") @db.Decimal(12, 2)
+  decidedById        String?              @map("decided_by_id") @db.Uuid
+  decidedAt          DateTime?            @map("decided_at")
+  decisionNote       String?              @map("decision_note")
+  merchantAcceptedAt DateTime?            @map("merchant_accepted_at")
+  journalEntryId     String?              @unique @map("journal_entry_id") @db.Uuid
+  version            Int                  @default(0)
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  merchant   User     @relation("ShortfallMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  driver     User     @relation("ShortfallDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  proposedBy User?    @relation("ShortfallProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  decidedBy  User?    @relation("ShortfallDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([merchantId, status])
+  @@map("cod_shortfalls")
+}
+
+enum AdjustmentType {
+  MERCHANT_CREDIT
+  MERCHANT_DEBIT
+}
+
+/// A requested manual merchant credit/debit. Posted only after a second person approves it.
+model FinancialAdjustment {
+  id             String         @id @default(uuid(7)) @db.Uuid
+  type           AdjustmentType
+  merchantId     String         @map("merchant_id") @db.Uuid
+  amount         Decimal        @db.Decimal(12, 2)
+  reason         String
+  status         ApprovalStatus @default(PENDING_APPROVAL)
+  requestedById  String         @map("requested_by_id") @db.Uuid
+  decidedById    String?        @map("decided_by_id") @db.Uuid
+  decidedAt      DateTime?      @map("decided_at")
+  decisionNote   String?        @map("decision_note")
+  journalEntryId String?        @unique @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  merchant    User  @relation("AdjustmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  requestedBy User  @relation("AdjustmentRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy   User? @relation("AdjustmentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@map("financial_adjustments")
+}
+
+/// Configurable finance values (e.g. the approval threshold). Every change is kept below.
+model FinanceSetting {
+  key         String   @id
+  value       String
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@map("finance_settings")
+}
+
+model FinanceSettingChange {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  key         String
+  oldValue    String?  @map("old_value")
+  newValue    String   @map("new_value")
+  reason      String
+  changedById String   @map("changed_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  changedBy User @relation("SettingChanger", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([key, createdAt])
+  @@map("finance_setting_changes")
+}
+
+/// Replay protection for money-moving requests (one result per user, scope and key).
+model IdempotencyRecord {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  scope          String
+  key            String
+  requestHash    String    @map("request_hash")
+  responseStatus Int?      @map("response_status")
+  responseBody   Json?     @map("response_body")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+
+  @@unique([userId, scope, key])
+  @@map("idempotency_records")
 }

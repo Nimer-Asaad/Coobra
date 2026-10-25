@@ -28,9 +28,9 @@ export const shipmentDetailsInclude = {
   },
   codCollections: {
     orderBy: { recordedAt: 'desc' },
-    take: 1,
     include: { driver: { select: personSelect } },
   },
+  shortfall: { select: { id: true, status: true, resolution: true } },
   pricing: true,
   feeOverrides: {
     orderBy: { createdAt: 'asc' },
@@ -71,6 +71,7 @@ export function toShipmentListItem(shipment: ShipmentForList, labels: Labels): S
       businessName: shipment.merchant.merchantProfile?.businessName ?? shipment.merchant.fullName,
     },
     driver: person(shipment.driver),
+    codStatus: shipment.codStatus,
     createdAt: shipment.createdAt.toISOString(),
     updatedAt: shipment.updatedAt.toISOString(),
   };
@@ -83,6 +84,23 @@ export function toShipmentDetails(shipment: ShipmentForDetails, labels: Labels):
   return {
     ...toShipmentListItem(shipment, labels),
     origin: label(shipment.originZoneId),
+    codInfo: {
+      status: shipment.codStatus,
+      expected: money(shipment.codAmount),
+      collected: money(shipment.codCollectedAmount),
+      outstanding: money(shipment.codAmount.minus(shipment.codCollectedAmount)),
+      collections: shipment.codCollections
+        .filter((collection) => collection.collectedAmount.greaterThan(0))
+        .map((collection) => ({
+          id: collection.id,
+          amount: money(collection.collectedAmount),
+          clearedAmount: money(collection.clearedAmount),
+          driver: { id: collection.driver.id, fullName: collection.driver.fullName },
+          note: collection.note,
+          recordedAt: collection.recordedAt.toISOString(),
+        })),
+      shortfall: shipment.shortfall,
+    },
     pricing: pricing
       ? {
           source: pricing.source,

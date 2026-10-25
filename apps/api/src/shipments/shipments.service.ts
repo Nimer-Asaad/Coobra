@@ -26,6 +26,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { isUniqueViolation } from '../auth/auth.service.js';
 import { AppException, Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
+import { CodService } from '../finance/cod.service.js';
 import { PricingService, type PriceResult } from '../pricing/pricing.service.js';
 import { ZonesService } from '../pricing/zones.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -60,6 +61,7 @@ export class ShipmentsService {
     private readonly audit: AuditService,
     private readonly pricing: PricingService,
     private readonly zones: ZonesService,
+    private readonly cod: CodService,
   ) {}
 
   /** Maps a shipment with zone labels (paths) resolved. */
@@ -257,6 +259,7 @@ export class ShipmentsService {
               recipientNotes: input.recipientNotes ?? null,
               merchantNotes: input.merchantNotes ?? null,
               codAmount: input.codAmount,
+              codStatus: new Prisma.Decimal(input.codAmount).isZero() ? 'NOT_REQUIRED' : 'PENDING',
               deliveryFee: fee,
               originZoneId,
               destinationZoneId: input.destinationZoneId,
@@ -445,16 +448,8 @@ export class ShipmentsService {
           break;
       }
 
-      let cod: { collected: boolean; amount: string } | null = null;
-      if (rule.requiresCodConfirmation) {
-        if (!input.cod) throw Errors.validation({ cod: 'validation.cod.confirmRequired' });
-        const expected = current.codAmount;
-        const collected = new Prisma.Decimal(input.cod.amount);
-        const matches = expected.isZero()
-          ? !input.cod.collected && collected.isZero()
-          : input.cod.collected && collected.equals(expected);
-        if (!matches) throw Errors.shipmentCodMismatch();
-        cod = input.cod;
+      if (rule.requiresCodConfirmation && !input.cod) {
+        throw Errors.validation({ cod: 'validation.cod.confirmRequired' });
       }
 
       await this.applyUpdate(tx, current, data);
@@ -468,18 +463,9 @@ export class ShipmentsService {
           note: input.reason ?? null,
         },
       });
-      if (cod) {
-        await tx.codCollection.create({
-          data: {
-            shipmentId: id,
-            driverId: actor.id,
-            collected: cod.collected,
-            expectedAmount: current.codAmount,
-            collectedAmount: cod.amount,
-            currency: current.currency,
-            recordedAt: now,
-          },
-        });
+      if (rule.requiresCodConfirmation && input.cod) {
+        // Validates the confirmation, records the collection and posts COD and the fee.
+        await this.cod.onDelivered(tx, current, actor, input.cod, now);
       }
       return { shipment: await this.findScoped(tx, actor, id), fromStatus: current.status };
     });

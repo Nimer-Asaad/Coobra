@@ -411,6 +411,13 @@ export const en = {
     quote: { invalid: 'This price quote is not valid.' },
     pricing: { fallbackZones: 'A fallback rule applies to all routes and cannot have zones.' },
     date: { invalid: 'Enter a valid date.', order: 'The end date must be after the start date.' },
+    finance: {
+      resolution: 'Choose how the shortfall is resolved.',
+      adjustmentType: 'Choose credit or debit.',
+      sameFee: 'The new fee is the same as the current fee.',
+      method: 'Choose a payment method.',
+      reference: 'Enter the payment reference.',
+    },
   },
   errors: {
     VALIDATION_FAILED: 'Please correct the highlighted fields.',
@@ -443,6 +450,19 @@ export const en = {
     FEE_OVERRIDE_NOT_ALLOWED:
       'The fee can no longer be changed directly. Use a financial correction.',
     CONFLICT: 'This record was changed in the meantime. Reload and try again.',
+    SELF_APPROVAL_FORBIDDEN:
+      'You cannot approve something you created or proposed. Ask a colleague.',
+    APPROVAL_LIMIT_EXCEEDED:
+      'This amount is above your approval limit. A super admin must approve it.',
+    IDEMPOTENCY_KEY_REQUIRED:
+      'The request is missing its safety key. Reload the page and try again.',
+    IDEMPOTENCY_KEY_REUSED:
+      'This action was already sent with different details. Reload and try again.',
+    IDEMPOTENCY_IN_PROGRESS: 'This action is still being processed. Wait a moment.',
+    COD_EXCEEDS_EXPECTED: 'The amount is more than the cash still to be collected.',
+    INVALID_STATE: 'This action is not possible in the current state. Reload and check.',
+    INSUFFICIENT_FUNDS: 'There are not enough confirmed funds for this.',
+    DUPLICATE_POSTING: 'This was already recorded.',
     NETWORK: 'Cannot reach the server. Check your connection and try again.',
   },
   email: {

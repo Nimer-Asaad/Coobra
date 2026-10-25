@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { IDEMPOTENCY_HEADER } from '@coobra/shared';
 import { apiFetch, getSessionToken } from '@/lib/api-server';
 import { isSameOriginRequest } from '@/lib/same-origin';
 
@@ -45,10 +46,13 @@ async function proxy(request: Request, context: RouteContext<'/api/bff/[...path]
 
   const search = new URL(request.url).search;
   const body = request.method === 'GET' ? undefined : await request.text();
+  // Money-moving endpoints need the client's Idempotency-Key (replay protection).
+  const idempotencyKey = request.headers.get(IDEMPOTENCY_HEADER);
   const upstream = await apiFetch(`/${path.map(encodeURIComponent).join('/')}${search}`, {
     method: request.method,
     token: await getSessionToken(),
     body: body || undefined,
+    headers: idempotencyKey ? { [IDEMPOTENCY_HEADER]: idempotencyKey } : undefined,
   });
 
   return new NextResponse(upstream.status === 204 ? null : await upstream.text(), {
@@ -57,4 +61,4 @@ async function proxy(request: Request, context: RouteContext<'/api/bff/[...path]
   });
 }
 
-export { proxy as GET, proxy as POST, proxy as PATCH, proxy as DELETE };
+export { proxy as GET, proxy as POST, proxy as PATCH, proxy as PUT, proxy as DELETE };

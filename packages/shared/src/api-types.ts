@@ -1,4 +1,5 @@
 import type { Language } from './language.js';
+import type { CodStatus, ShipmentCodInfo } from './finance.js';
 import type { ShipmentPricingInfo, ZoneLabel } from './pricing.js';
 import type { Currency, ShipmentStatus } from './shipments.js';
 import type { ClientApp, UserRole } from './roles.js';
@@ -101,6 +102,7 @@ export interface ShipmentListItem {
   currency: Currency;
   merchant: ShipmentMerchant;
   driver: ShipmentPerson | null;
+  codStatus: CodStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -144,6 +146,8 @@ export interface ShipmentDetails extends ShipmentListItem {
   origin: ZoneLabel | null;
   /** How the delivery fee was priced; null for Phase 2 shipments priced manually or not at all. */
   pricing: ShipmentPricingInfo | null;
+  /** COD progress: collections, outstanding balance and shortfall case. */
+  codInfo: ShipmentCodInfo;
   history: ShipmentHistoryEntry[];
   /** Concurrency token; changes on every update. */
   version: number;

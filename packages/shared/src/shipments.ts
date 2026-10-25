@@ -338,6 +338,11 @@ export const codConfirmationSchema = z.object({
   collected: z.boolean({ error: 'validation.cod.confirmRequired' }),
   amount: moneySchema(MAX_COD_AMOUNT),
   confirmed: z.literal(true, { error: 'validation.cod.confirmRequired' }),
+  /**
+   * Phase 3: when the recipient paid less than the COD, the driver explains why. The shipment
+   * is delivered with a PARTIAL COD status and a shortfall case is opened for review.
+   */
+  partialReason: optionalText(500),
 });
 export type CodConfirmationInput = z.infer<typeof codConfirmationSchema>;
 
