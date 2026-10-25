@@ -62,6 +62,8 @@ Policy: 10–128 characters, at least one letter and one digit (any script, so A
     (`expo-secure-store`).
   - _Expo web builds_: `x-auth-transport: cookie` → the API sets an **httpOnly, SameSite=Strict**
     cookie; the token is never readable by JavaScript and never stored in `localStorage`.
+    Both web apps share that API cookie in one browser, so each app ignores a restored session
+    whose `clientApp` is not its own.
     Cookie-authenticated state-changing requests must carry an `Origin` from `CORS_ORIGINS`
     (CSRF defence). In production the web apps and the API must share a registrable domain
     (e.g. `app.coobra.example` and `api.coobra.example`).
@@ -96,10 +98,11 @@ configuration when `NODE_ENV=production`.
 requests/completions, email verification, user creation and preference changes, with IP and
 user agent. `actorUserId` is always the real human — this is the foundation for impersonation.
 
-## Data model (Phase 1)
+## Data model
 
-`users`, `merchant_profiles`, `sessions`, `auth_tokens`, `audit_logs` — see
-`packages/database/prisma/schema.prisma` and the `init_auth` migration.
+Phase 1: `users`, `merchant_profiles`, `sessions`, `auth_tokens`, `audit_logs` (`init_auth` migration).
+Phase 2: `shipments`, `shipment_status_history`, `cod_collections` (`shipments` migration) — see
+[shipments.md](shipments.md) and `packages/database/prisma/schema.prisma`.
 
 ## Internationalisation and RTL
 
