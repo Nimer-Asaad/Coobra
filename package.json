@@ -1,0 +1,29 @@
+{
+  "name": "coobra",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "export:web": "turbo run export:web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter @coobra/database db:generate",
+    "db:validate": "pnpm --filter @coobra/database db:validate",
+    "db:migrate": "pnpm --filter @coobra/database db:migrate",
+    "db:deploy": "pnpm --filter @coobra/database db:deploy",
+    "admin:create-super-admin": "pnpm --filter @coobra/api create-super-admin"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2",
+    "turbo": "2.11.10",
+    "typescript": "~6.0.3"
+  }
+}

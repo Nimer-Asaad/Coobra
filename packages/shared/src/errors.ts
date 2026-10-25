@@ -1,0 +1,40 @@
+/**
+ * Stable, machine-readable error codes returned by the API.
+ * Clients translate them with the `errors.<CODE>` i18n keys.
+ */
+export const ERROR_CODES = [
+  'VALIDATION_FAILED',
+  'UNAUTHENTICATED',
+  'FORBIDDEN',
+  'NOT_FOUND',
+  'RATE_LIMITED',
+  'INTERNAL_ERROR',
+  'AUTH_INVALID_CREDENTIALS',
+  'AUTH_ACCOUNT_DISABLED',
+  'AUTH_ROLE_NOT_ALLOWED_FOR_APP',
+  'AUTH_EMAIL_NOT_VERIFIED',
+  'AUTH_EMAIL_ALREADY_REGISTERED',
+  'AUTH_EMAIL_ALREADY_VERIFIED',
+  'AUTH_TOKEN_INVALID',
+  'CSRF_ORIGIN_REJECTED',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+export interface ApiErrorBody {
+  statusCode: number;
+  code: ErrorCode;
+  /** Developer-facing message (English). Never show it to end users; translate `code` instead. */
+  message: string;
+  /** For VALIDATION_FAILED: field path -> i18n key of the validation message. */
+  fieldErrors?: Record<string, string>;
+}
+
+export function isApiErrorBody(value: unknown): value is ApiErrorBody {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as ApiErrorBody).code === 'string' &&
+    typeof (value as ApiErrorBody).statusCode === 'number'
+  );
+}

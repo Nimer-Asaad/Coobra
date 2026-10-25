@@ -1,0 +1,21 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Expo/Metro work most reliably with a hoisted node_modules layout in monorepos.
+nodeLinker: hoisted
+
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - argon2
+  - prisma
+
+ignoredBuiltDependencies:
+  - unrs-resolver
+
+# A single React version across Next.js and Expo (Expo SDK 58 requires 19.3.0).
+overrides:
+  react: 19.3.0
+  react-dom: 19.3.0
+  # Security: GHSA-q7qp-rjg7-q26m (pulled in by @nestjs/platform-express 12.2.0).
+  multer: 2.5.0
