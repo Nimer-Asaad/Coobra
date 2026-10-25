@@ -4,3 +4,8 @@ pnpm-lock.yaml
 **/.expo
 **/src/generated
 **/migrations/**/*.sql
+# AI-assistant skill bundles installed locally by tooling (e.g. Prisma skills); not project code
+**/.agents
+**/.claude
+**/.windsurf
+**/skills-lock.json
