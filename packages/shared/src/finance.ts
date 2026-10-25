@@ -188,3 +188,107 @@ export interface ShipmentCodInfo {
   collections: CodCollectionItem[];
   shortfall: { id: string; status: ShortfallStatus; resolution: ShortfallResolution | null } | null;
 }
+
+// ---------------------------------------------------------------------------
+// Driver settlements, cash shortages and repayments
+// ---------------------------------------------------------------------------
+
+export const CASH_CHANNELS = ['HUB', 'BANK', 'EWALLET'] as const;
+export type CashChannel = (typeof CASH_CHANNELS)[number];
+
+const channel = z.enum(CASH_CHANNELS, { error: 'validation.finance.method' }).default('HUB');
+
+/** The driver declares how much cash they are handing over. */
+export const submitSettlementSchema = z.object({
+  declaredAmount: moneySchema(1_000_000),
+  note,
+});
+export type SubmitSettlementInput = z.infer<typeof submitSettlementSchema>;
+
+/** A finance user records a settlement at the counter on the driver's behalf. */
+export const staffSettlementSchema = submitSettlementSchema.extend({
+  driverId: z.uuid({ error: 'validation.driver.required' }),
+});
+export type StaffSettlementInput = z.infer<typeof staffSettlementSchema>;
+
+/** The counted amount is cleared (≤ declared); the rest stays in the driver's custody. */
+export const confirmSettlementSchema = z.object({
+  countedAmount: moneySchema(1_000_000),
+  channel,
+  /** Clear these shipments' collections first; otherwise oldest collections first. */
+  shipmentIds: z.array(z.uuid()).max(500).optional(),
+  note,
+});
+export type ConfirmSettlementInput = z.infer<typeof confirmSettlementSchema>;
+
+export const driverShortageSchema = z.object({
+  driverId: z.uuid({ error: 'validation.driver.required' }),
+  amount: moneySchema(1_000_000),
+  responsibility: z.enum(['DRIVER_LIABLE', 'COMPANY_ABSORBS'], {
+    error: 'validation.finance.resolution',
+  }),
+  reason: reasonTextSchema,
+});
+export type DriverShortageInput = z.infer<typeof driverShortageSchema>;
+
+export const driverRepaymentSchema = z.object({
+  driverId: z.uuid({ error: 'validation.driver.required' }),
+  amount: moneySchema(1_000_000),
+  channel,
+  note,
+});
+export type DriverRepaymentInput = z.infer<typeof driverRepaymentSchema>;
+
+export interface SettlementItem {
+  id: string;
+  driver: PersonRef;
+  status: 'SUBMITTED' | 'CONFIRMED' | 'REJECTED';
+  declaredAmount: string;
+  countedAmount: string | null;
+  channel: CashChannel;
+  note: string | null;
+  submittedBy: PersonRef;
+  decidedBy: PersonRef | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  clearings: { shipment: { id: string; trackingNumber: string }; amount: string }[];
+  createdAt: string;
+}
+
+export interface DriverShortageItem {
+  id: string;
+  driver: PersonRef;
+  amount: string;
+  responsibility: 'DRIVER_LIABLE' | 'COMPANY_ABSORBS';
+  reason: string;
+  status: 'APPLIED' | 'PENDING_APPROVAL' | 'REJECTED';
+  proposedBy: PersonRef;
+  decidedBy: PersonRef | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+}
+
+export interface UnclearedCollection {
+  collectionId: string;
+  shipment: { id: string; trackingNumber: string };
+  amount: string;
+  uncleared: string;
+  recordedAt: string;
+}
+
+/** What a driver sees about their own cash. */
+export interface DriverFinanceSummary {
+  custody: string;
+  receivable: string;
+  pendingSettlement: SettlementItem | null;
+  uncleared: UnclearedCollection[];
+  settlements: SettlementItem[];
+}
+
+export interface DriverBalanceRow {
+  driver: PersonRef & { phone: string | null };
+  custody: string;
+  receivable: string;
+  pendingSettlement: string | null;
+}

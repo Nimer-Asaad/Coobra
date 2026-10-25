@@ -417,6 +417,7 @@ export const en = {
       sameFee: 'The new fee is the same as the current fee.',
       method: 'Choose a payment method.',
       reference: 'Enter the payment reference.',
+      counted: 'The counted amount must be more than 0 and not more than the declared amount.',
     },
   },
   errors: {
