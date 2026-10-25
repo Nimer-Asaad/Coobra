@@ -1,4 +1,5 @@
 import type { Prisma } from '@coobra/database';
+import { returnInclude, toReturnInfo } from '../finance/returns.service.js';
 import type {
   Currency,
   ShipmentDetails,
@@ -31,6 +32,7 @@ export const shipmentDetailsInclude = {
     include: { driver: { select: personSelect } },
   },
   shortfall: { select: { id: true, status: true, resolution: true } },
+  returnRecord: { include: returnInclude },
   pricing: true,
   feeOverrides: {
     orderBy: { createdAt: 'asc' },
@@ -84,6 +86,7 @@ export function toShipmentDetails(shipment: ShipmentForDetails, labels: Labels):
   return {
     ...toShipmentListItem(shipment, labels),
     origin: label(shipment.originZoneId),
+    returnInfo: shipment.returnRecord ? toReturnInfo(shipment.returnRecord) : null,
     codInfo: {
       status: shipment.codStatus,
       expected: money(shipment.codAmount),

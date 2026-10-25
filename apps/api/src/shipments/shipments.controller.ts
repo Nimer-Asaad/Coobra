@@ -2,6 +2,8 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { Throttle } from '@nestjs/throttler';
 import {
   adminCreateShipmentSchema,
+  approveReturnSchema,
+  type ApproveReturnInput,
   assignDriverSchema,
   createShipmentSchema,
   listPeopleQuerySchema,
@@ -78,6 +80,18 @@ export class AdminShipmentsController {
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
     return this.shipments.assign(auth.user, id, body.driverId, body.note, meta);
+  }
+
+  @Roles(...SHIPMENT_MANAGER_ROLES)
+  @HttpCode(200)
+  @Post('shipments/:id/return/approve')
+  approveReturn(
+    @Auth() auth: RequestAuth,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(approveReturnSchema)) body: ApproveReturnInput,
+    @Meta() meta: RequestMeta,
+  ): Promise<ShipmentDetails> {
+    return this.shipments.approveReturn(auth.user, id, body, meta);
   }
 
   @Roles(...SHIPMENT_MANAGER_ROLES)

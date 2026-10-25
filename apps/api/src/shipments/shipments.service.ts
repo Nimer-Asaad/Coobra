@@ -27,6 +27,7 @@ import { isUniqueViolation } from '../auth/auth.service.js';
 import { AppException, Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
 import { CodService } from '../finance/cod.service.js';
+import { ReturnsService } from '../finance/returns.service.js';
 import { PricingService, type PriceResult } from '../pricing/pricing.service.js';
 import { ZonesService } from '../pricing/zones.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -62,6 +63,7 @@ export class ShipmentsService {
     private readonly pricing: PricingService,
     private readonly zones: ZonesService,
     private readonly cod: CodService,
+    private readonly returns: ReturnsService,
   ) {}
 
   /** Maps a shipment with zone labels (paths) resolved. */
@@ -400,6 +402,56 @@ export class ShipmentsService {
   }
 
   /**
+   * Approves a requested return (or changes the return driver). Without a driver the merchant
+   * collects the parcel at the office. Atomic and protected against concurrent changes.
+   */
+  async approveReturn(
+    staff: Actor,
+    id: string,
+    input: { driverId?: string; note?: string },
+    meta: RequestMeta,
+  ): Promise<ShipmentDetails> {
+    if (input.driverId) {
+      const driver = await this.prisma.client.user.findFirst({
+        where: { id: input.driverId, role: 'DRIVER', status: 'ACTIVE' },
+        select: { id: true },
+      });
+      if (!driver) throw Errors.shipmentDriverInvalid();
+    }
+    const shipment = await this.prisma.client.$transaction(async (tx) => {
+      const current = await this.findScoped(tx, staff, id);
+      if (current.status !== 'RETURN_REQUESTED' && current.status !== 'RETURN_APPROVED') {
+        throw Errors.shipmentInvalidTransition();
+      }
+      await this.applyUpdate(tx, current, {
+        status: 'RETURN_APPROVED',
+        driverId: input.driverId ?? null,
+      });
+      await tx.shipmentStatusHistory.create({
+        data: {
+          shipmentId: id,
+          fromStatus: current.status,
+          toStatus: 'RETURN_APPROVED',
+          actorUserId: staff.id,
+          actorRole: staff.role,
+          driverId: input.driverId ?? null,
+          note: input.note ?? null,
+        },
+      });
+      await this.returns.onApproved(tx, current, staff, input.driverId ?? null);
+      return this.findScoped(tx, staff, id);
+    });
+    await this.audit.record({
+      action: 'RETURN_APPROVED',
+      actorUserId: staff.id,
+      targetUserId: shipment.merchantId,
+      meta,
+      metadata: { shipmentId: id, returnDriverId: input.driverId ?? null },
+    });
+    return this.toDetails(this.prisma.client, shipment);
+  }
+
+  /**
    * Moves a shipment through its lifecycle. Validates the transition table, the actor's role
    * and ownership, mandatory reasons and the COD confirmation, then updates the shipment,
    * appends history and records COD in one transaction guarded by the version column.
@@ -466,6 +518,13 @@ export class ShipmentsService {
       if (rule.requiresCodConfirmation && input.cod) {
         // Validates the confirmation, records the collection and posts COD and the fee.
         await this.cod.onDelivered(tx, current, actor, input.cod, now);
+      }
+      if (input.toStatus === 'RETURN_REQUESTED') {
+        await this.returns.onRequested(tx, current, actor, input.reason ?? null);
+      }
+      if (input.toStatus === 'RETURNED') {
+        // Posts the return fee if decided; never refunds or reverses anything automatically.
+        await this.returns.onReturned(tx, current, actor, now);
       }
       return { shipment: await this.findScoped(tx, actor, id), fromStatus: current.status };
     });

@@ -105,6 +105,10 @@ model User {
   merchantPayments     MerchantPayment[]       @relation("MerchantPaymentMerchant")
   recordedPayments     MerchantPayment[]       @relation("MerchantPaymentRecorder")
   treasuryTransfers    TreasuryTransfer[]      @relation("TransferRecorder")
+  requestedReturns     ReturnRecord[]          @relation("ReturnRequester")
+  approvedReturns      ReturnRecord[]          @relation("ReturnApprover")
+  returnTasks          ReturnRecord[]          @relation("ReturnDriver")
+  returnFeeDecisions   ReturnRecord[]          @relation("ReturnFeeSetter")
 
   @@index([role])
   @@map("users")
@@ -194,6 +198,13 @@ enum ShipmentStatus {
   DELIVERED
   DELIVERY_FAILED
   RETURN_REQUESTED
+  /// Phase 3: return approved/scheduled, usually with a return driver.
+  RETURN_APPROVED
+  /// Phase 3: the driver is carrying the parcel back.
+  RETURN_IN_TRANSIT
+  /// Phase 3: back at the company hub, waiting for the merchant.
+  RETURNED_TO_HUB
+  /// Returned to the merchant (final).
   RETURNED
   CANCELLED
 }
@@ -259,6 +270,7 @@ model Shipment {
   feeOverrides    ShipmentFeeOverride[]
   pricingQuote    PricingQuote?
   shortfall       CodShortfall?
+  returnRecord    ReturnRecord?
   journalLines    JournalLine[]
 
   @@index([merchantId, createdAt(sort: Desc)])
@@ -933,4 +945,51 @@ model TreasuryTransfer {
   recordedBy User @relation("TransferRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
 
   @@map("treasury_transfers")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — returns
+// ---------------------------------------------------------------------------
+
+enum ReturnFeeStatus {
+  /// No return fee configured for the route: an administrator must set one or waive it.
+  RETURN_FEE_UNCONFIGURED
+  SET
+  WAIVED
+  POSTED
+}
+
+/// The return of a shipment to its merchant. Physical progress is the shipment status; this
+/// record holds the request, approval, return driver and the return fee decision.
+model ReturnRecord {
+  id               String          @id @default(uuid(7)) @db.Uuid
+  shipmentId       String          @unique @map("shipment_id") @db.Uuid
+  requestedById    String?         @map("requested_by_id") @db.Uuid
+  requestReason    String?         @map("request_reason")
+  requestedAt      DateTime        @default(now()) @map("requested_at")
+  approvedById     String?         @map("approved_by_id") @db.Uuid
+  approvedAt       DateTime?       @map("approved_at")
+  returnDriverId   String?         @map("return_driver_id") @db.Uuid
+  /// The delivery driver before the return was assigned (for the record).
+  originalDriverId String?         @map("original_driver_id") @db.Uuid
+  feeStatus        ReturnFeeStatus @map("fee_status")
+  feeAmount        Decimal?        @map("fee_amount") @db.Decimal(12, 2)
+  feeSetById       String?         @map("fee_set_by_id") @db.Uuid
+  feeSetAt         DateTime?       @map("fee_set_at")
+  feeReason        String?         @map("fee_reason")
+  journalEntryId   String?         @unique @map("journal_entry_id") @db.Uuid
+  completedAt      DateTime?       @map("completed_at")
+  closedAt         DateTime?       @map("closed_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  requestedBy  User?    @relation("ReturnRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy   User?    @relation("ReturnApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  returnDriver User?    @relation("ReturnDriver", fields: [returnDriverId], references: [id], onDelete: Restrict)
+  feeSetBy     User?    @relation("ReturnFeeSetter", fields: [feeSetById], references: [id], onDelete: Restrict)
+
+  @@index([feeStatus])
+  @@index([closedAt])
+  @@map("return_records")
 }

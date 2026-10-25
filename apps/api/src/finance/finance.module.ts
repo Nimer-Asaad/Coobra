@@ -9,6 +9,8 @@ import {
 } from './finance.controller.js';
 import { IdempotencyService } from './idempotency.service.js';
 import { LedgerService } from './ledger.service.js';
+import { ReturnsController } from './returns.controller.js';
+import { ReturnsService } from './returns.service.js';
 import { AdminPayoutsController, MerchantPayoutsController } from './payouts.controller.js';
 import { PayoutsService } from './payouts.service.js';
 import {
@@ -26,6 +28,7 @@ import { SettlementsService } from './settlements.service.js';
     DriverSettlementsController,
     AdminPayoutsController,
     MerchantPayoutsController,
+    ReturnsController,
   ],
   providers: [
     LedgerService,
@@ -35,7 +38,8 @@ import { SettlementsService } from './settlements.service.js';
     AdjustmentsService,
     SettlementsService,
     PayoutsService,
+    ReturnsService,
   ],
-  exports: [LedgerService, IdempotencyService, ApprovalService, CodService],
+  exports: [LedgerService, IdempotencyService, ApprovalService, CodService, ReturnsService],
 })
 export class FinanceModule {}

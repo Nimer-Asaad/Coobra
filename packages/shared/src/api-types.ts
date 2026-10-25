@@ -1,7 +1,7 @@
 import type { Language } from './language.js';
 import type { CodStatus, ShipmentCodInfo } from './finance.js';
 import type { ShipmentPricingInfo, ZoneLabel } from './pricing.js';
-import type { Currency, ShipmentStatus } from './shipments.js';
+import type { Currency, ReturnFeeStatus, ShipmentStatus } from './shipments.js';
 import type { ClientApp, UserRole } from './roles.js';
 
 export type UserStatus = 'ACTIVE' | 'DISABLED';
@@ -148,6 +148,8 @@ export interface ShipmentDetails extends ShipmentListItem {
   pricing: ShipmentPricingInfo | null;
   /** COD progress: collections, outstanding balance and shortfall case. */
   codInfo: ShipmentCodInfo;
+  /** Return request, approval, return driver and fee decision (null if never requested). */
+  returnInfo: ShipmentReturnInfo | null;
   history: ShipmentHistoryEntry[];
   /** Concurrency token; changes on every update. */
   version: number;
@@ -174,4 +176,24 @@ export interface DriverOption {
   fullName: string;
   phone: string | null;
   activeShipments: number;
+}
+
+export interface ShipmentReturnInfo {
+  id: string;
+  requestedAt: string;
+  requestedBy: { id: string; fullName: string } | null;
+  requestReason: string | null;
+  approvedAt: string | null;
+  approvedBy: { id: string; fullName: string } | null;
+  returnDriver: ShipmentPerson | null;
+  feeStatus: ReturnFeeStatus;
+  feeAmount: string | null;
+  feeReason: string | null;
+  completedAt: string | null;
+  closedAt: string | null;
+}
+
+export interface ReturnListItem extends ShipmentReturnInfo {
+  shipment: { id: string; trackingNumber: string; status: ShipmentStatus; recipientName: string };
+  merchant: { id: string; businessName: string };
 }
