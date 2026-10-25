@@ -12,6 +12,9 @@ export const STATUS_STYLES: Record<ShipmentStatus, string> = {
   DELIVERED: 'bg-emerald-100 text-emerald-900',
   DELIVERY_FAILED: 'bg-red-100 text-red-900',
   RETURN_REQUESTED: 'bg-orange-100 text-orange-900',
+  RETURN_APPROVED: 'bg-orange-100 text-orange-900',
+  RETURN_IN_TRANSIT: 'bg-orange-200 text-orange-950',
+  RETURNED_TO_HUB: 'bg-purple-100 text-purple-900',
   RETURNED: 'bg-zinc-200 text-zinc-800',
   CANCELLED: 'bg-zinc-100 text-zinc-500',
 };

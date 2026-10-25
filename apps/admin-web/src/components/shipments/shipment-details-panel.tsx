@@ -8,6 +8,8 @@ import {
   ASSIGNABLE_STATUSES,
   availableShipmentTransitions,
   feeOverrideSchema,
+  FINANCE_ROLES,
+  type UserRole,
   type DriverOption,
   type FeeOverrideInput,
   type ShipmentDetails,
@@ -28,9 +30,19 @@ import { formatDateTime, formatMoney } from '@/lib/format';
 import { useFormErrors } from '@/lib/use-form-errors';
 import { zoneText } from '@/lib/zones';
 import { FormField } from '@/components/form-field';
+import { CodCard, ReturnCard } from './shipment-finance-cards';
 import { StatusBadge } from './status-badge';
 
-export function ShipmentDetailsPanel({ id, canManage }: { id: string; canManage: boolean }) {
+export function ShipmentDetailsPanel({
+  id,
+  canManage,
+  role,
+}: {
+  id: string;
+  canManage: boolean;
+  role: UserRole;
+}) {
+  const isFinance = (FINANCE_ROLES as readonly UserRole[]).includes(role);
   const { t, i18n } = useTranslation();
   const key = ['admin', 'shipments', 'detail', id];
   const shipment = useQuery({
@@ -151,6 +163,10 @@ export function ShipmentDetailsPanel({ id, canManage }: { id: string; canManage:
           </Card>
 
           <PricingCard shipment={s} canOverride={canManage} queryKey={key} />
+
+          <CodCard shipment={s} canCorrectFee={isFinance} queryKey={key} />
+
+          <ReturnCard shipment={s} canApprove={canManage} canDecideFee={isFinance} queryKey={key} />
 
           <Card>
             <CardHeader>

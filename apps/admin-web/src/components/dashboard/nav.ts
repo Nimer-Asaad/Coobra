@@ -1,4 +1,4 @@
-import { SHIPMENT_VIEWER_ROLES, type UserRole } from '@coobra/shared';
+import { FINANCE_VIEW_ROLES, SHIPMENT_VIEWER_ROLES, type UserRole } from '@coobra/shared';
 
 export interface NavItem {
   href: string;
@@ -10,6 +10,8 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', labelKey: 'nav.dashboard' },
   { href: '/shipments', labelKey: 'nav.shipments', roles: SHIPMENT_VIEWER_ROLES },
+  { href: '/returns', labelKey: 'nav.returns', roles: SHIPMENT_VIEWER_ROLES },
+  { href: '/finance', labelKey: 'nav.finance', roles: [...FINANCE_VIEW_ROLES, 'OPERATIONS'] },
   { href: '/pricing', labelKey: 'nav.pricing', roles: SHIPMENT_VIEWER_ROLES },
   { href: '/zones', labelKey: 'nav.zones', roles: SHIPMENT_VIEWER_ROLES },
   { href: '/users', labelKey: 'nav.users', roles: ['SUPER_ADMIN'] },
