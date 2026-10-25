@@ -17,5 +17,7 @@ export default function setup(): void {
     cwd: databaseDir,
     env: { ...process.env, DATABASE_URL: url },
     stdio: 'inherit',
+    // On Windows `pnpm` is a .cmd shim, which Node can only spawn through a shell.
+    shell: process.platform === 'win32',
   });
 }

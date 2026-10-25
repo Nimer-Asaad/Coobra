@@ -1,0 +1,15 @@
+# Normalise text files to LF in the working tree on every OS (Prettier expects LF, and shell
+# scripts mounted into Linux containers break with CRLF).
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
