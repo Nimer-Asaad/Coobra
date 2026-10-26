@@ -87,11 +87,17 @@ export class AdjustmentsService {
     return { id: override.id };
   }
 
-  /** The non-reversed fee posting currently charged for a shipment, if any. */
+  /**
+   * The non-reversed fee posting currently charged for a shipment, if any. A Phase 2 fee posted
+   * by the backfill counts too, or a correction would charge the merchant twice.
+   */
   private async currentFeeEntry(tx: Tx, shipmentId: string) {
     return tx.journalEntry.findFirst({
       where: {
-        kind: { in: ['DELIVERY_FEE', 'FEE_ADJUSTMENT'] },
+        OR: [
+          { kind: { in: ['DELIVERY_FEE', 'FEE_ADJUSTMENT'] } },
+          { kind: 'PHASE2_BACKFILL', sourceType: 'shipment_fee' },
+        ],
         lines: { some: { shipmentId } },
         reversedBy: { is: null },
       },

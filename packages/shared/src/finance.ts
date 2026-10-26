@@ -436,6 +436,9 @@ export interface FinanceOverview {
     adjustmentsPending: number;
     feeCorrectionsPending: number;
     returnsFeeUnconfigured: number;
+    /** Phase 2 records not yet posted to the ledger: excluded from every balance until backfilled. */
+    legacyCollectionsUnposted: number;
+    legacyFeesUnposted: number;
   };
   reconciliation: ReconciliationCheck[];
 }

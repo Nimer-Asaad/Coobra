@@ -165,6 +165,12 @@ describe('Finance reports, reconciliation and Phase 2 backfill (PostgreSQL integ
       ).body.code,
     ).toBe('INSUFFICIENT_FUNDS');
 
+    // Not hidden either: the overview counts what the backfill would post.
+    const pending = (await api(viewer).get('/v1/admin/finance/overview').expect(200))
+      .body as FinanceOverview;
+    expect(pending.queues).toMatchObject({ legacyCollectionsUnposted: 1, legacyFeesUnposted: 1 });
+    for (const check of pending.reconciliation) expect(check.difference).toBe('0.00');
+
     const dryRun = await runPhase2Backfill(ctx.prisma, { execute: false });
     expect(dryRun).toMatchObject({
       executed: false,
@@ -178,6 +184,9 @@ describe('Finance reports, reconciliation and Phase 2 backfill (PostgreSQL integ
     expect(await ctx.prisma.journalEntry.count({ where: { kind: 'PHASE2_BACKFILL' } })).toBe(2);
     expect(await ledgerBalance(ctx.prisma, `DRIVER_CUSTODY:${driver.id}`)).toBe('150.00');
     expect(await ledgerBalance(ctx.prisma, `MERCHANT_BALANCE:${merchant.id}`)).toBe('-15.00');
+    const posted = (await api(viewer).get('/v1/admin/finance/overview').expect(200))
+      .body as FinanceOverview;
+    expect(posted.queues).toMatchObject({ legacyCollectionsUnposted: 0, legacyFeesUnposted: 0 });
 
     const after = await api(driver).get('/v1/driver/finance').expect(200);
     expect(after.body.custody).toBe('150.00');
@@ -191,6 +200,47 @@ describe('Finance reports, reconciliation and Phase 2 backfill (PostgreSQL integ
     expect(again.collections).toHaveLength(0);
     expect(again.fees).toHaveLength(0);
     expect(await ctx.prisma.journalEntry.count()).toBe(2);
+    await assertLedgerInvariants(ctx.prisma);
+  });
+
+  it('reverses a backfilled fee when it is corrected, never charging twice', async () => {
+    const admin = await createSignedInUser(ctx, 'SUPER_ADMIN', 'admin@example.com');
+    const created = await api(merchant)
+      .post('/v1/merchant/shipments', {
+        recipientName: 'Recipient',
+        recipientPhone: '0599123456',
+        destinationZoneId: zones.ramallah,
+        addressLine: 'Street 1',
+        codAmount: '0',
+      })
+      .expect(201);
+    const id = created.body.id as string;
+    await ctx.prisma.shipment.update({
+      where: { id },
+      data: { status: 'DELIVERED', driverId: driver.id, deliveredAt: new Date() },
+    });
+    await runPhase2Backfill(ctx.prisma, { execute: true });
+    expect(await ledgerBalance(ctx.prisma, `MERCHANT_BALANCE:${merchant.id}`)).toBe('-15.00');
+
+    const requested = await api(accountant)
+      .post(`/v1/admin/finance/shipments/${id}/fee-correction`, {
+        fee: '10',
+        reason: 'Agreed discount',
+      })
+      .expect(201);
+    await api(admin)
+      .post(`/v1/admin/finance/fee-corrections/${requested.body.id}/approve`, {}, newKey())
+      .expect(200);
+
+    const backfilled = await ctx.prisma.journalEntry.findFirstOrThrow({
+      where: { kind: 'PHASE2_BACKFILL', sourceType: 'shipment_fee' },
+    });
+    const reversal = await ctx.prisma.journalEntry.findFirstOrThrow({
+      where: { kind: 'REVERSAL' },
+    });
+    expect(reversal.reversalOfId).toBe(backfilled.id);
+    expect(await ledgerBalance(ctx.prisma, `MERCHANT_BALANCE:${merchant.id}`)).toBe('-10.00');
+    expect(await ledgerBalance(ctx.prisma, 'DELIVERY_FEE_REVENUE')).toBe('10.00');
     await assertLedgerInvariants(ctx.prisma);
   });
 });

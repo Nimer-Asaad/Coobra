@@ -243,6 +243,8 @@ export const en = {
       adjustmentsPending: 'Adjustments to approve',
       feeCorrectionsPending: 'Fee corrections to approve',
       returnsFeeUnconfigured: 'Returns without a fee decision',
+      legacyCollectionsUnposted: 'Phase 2 COD collections not yet posted',
+      legacyFeesUnposted: 'Phase 2 delivery fees not yet posted',
     },
     reconciliation: 'Reconciliation',
     reconciled: 'Balanced',

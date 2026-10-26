@@ -245,6 +245,8 @@ export const ar: TranslationResource = {
       adjustmentsPending: 'تسويات بانتظار الاعتماد',
       feeCorrectionsPending: 'تصحيحات رسوم بانتظار الاعتماد',
       returnsFeeUnconfigured: 'إرجاعات دون قرار رسوم',
+      legacyCollectionsUnposted: 'تحصيلات المرحلة الثانية غير المرحّلة',
+      legacyFeesUnposted: 'رسوم توصيل المرحلة الثانية غير المرحّلة',
     },
     reconciliation: 'المطابقة',
     reconciled: 'مطابق',

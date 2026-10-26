@@ -124,6 +124,18 @@ export class ReportsService {
     });
     const [outstandingCod] = await db.$queryRaw<{ total: string | null }[]>`
       SELECT SUM(cod_amount - cod_collected_amount)::text AS total FROM shipments WHERE cod_status = 'PARTIAL'`;
+    // Same selection as the Phase 2 backfill, so legacy records stay visible until posted.
+    const [legacy] = await db.$queryRaw<{ collections: number; fees: number }[]>`
+      SELECT
+        (SELECT COUNT(*)::int FROM cod_collections c
+         WHERE c.collected_amount > 0
+           AND NOT EXISTS (SELECT 1 FROM journal_entries e
+                           WHERE e.source_type = 'cod_collection' AND e.source_id = c.id::text)) AS collections,
+        (SELECT COUNT(*)::int FROM shipments s
+         WHERE s.status = 'DELIVERED' AND s.delivery_fee > 0
+           AND NOT EXISTS (SELECT 1 FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
+                           WHERE l.shipment_id = s.id
+                             AND e.kind IN ('DELIVERY_FEE', 'FEE_ADJUSTMENT', 'PHASE2_BACKFILL'))) AS fees`;
     return {
       companyCash: {
         HUB: money(all('COMPANY_CASH_HUB')),
@@ -163,6 +175,8 @@ export class ReportsService {
         returnsFeeUnconfigured: await db.returnRecord.count({
           where: { feeStatus: 'RETURN_FEE_UNCONFIGURED' },
         }),
+        legacyCollectionsUnposted: legacy?.collections ?? 0,
+        legacyFeesUnposted: legacy?.fees ?? 0,
       },
       reconciliation: await this.reconciliation(),
     };
