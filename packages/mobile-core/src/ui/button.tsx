@@ -22,6 +22,7 @@ export function AppButton({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={title}
       accessibilityState={{ disabled: Boolean(inactive), busy: Boolean(loading) }}
       onPress={onPress}
       disabled={inactive}

@@ -86,6 +86,7 @@ export function RegisterScreen() {
         autoComplete="new-password"
         hint={t('auth.register.passwordHint', validationParams)}
         error={fieldErrors.password}
+        onSubmitEditing={submit}
       />
       <AppButton
         title={t('auth.register.submit')}

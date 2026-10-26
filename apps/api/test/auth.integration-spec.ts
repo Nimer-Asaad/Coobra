@@ -74,6 +74,15 @@ describe('Authentication (PostgreSQL integration)', () => {
     expect(ctx.mail.sent[0]?.text).toContain('http://localhost:8082/verify-email?token=');
   });
 
+  // QA BUG-001: Arabic-Indic digits in the registration phone are normalised, not rejected.
+  it('accepts and normalises Arabic-Indic digits in the merchant phone', async () => {
+    await register({ email: 'digits@example.com', phone: '٠٥٩٩١١١٢٢٢' }).expect(201);
+    const stored = await ctx.prisma.user.findUniqueOrThrow({
+      where: { email: 'digits@example.com' },
+    });
+    expect(stored.phone).toBe('0599111222');
+  });
+
   it('rejects duplicate emails and translatable validation errors', async () => {
     await register().expect(201);
     const dup = await register().expect(409);

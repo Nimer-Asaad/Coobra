@@ -424,6 +424,10 @@ export class ShipmentsService {
       if (current.status !== 'RETURN_REQUESTED' && current.status !== 'RETURN_APPROVED') {
         throw Errors.shipmentInvalidTransition();
       }
+      // Re-approving with the same return driver changes nothing: no duplicate history.
+      if (current.status === 'RETURN_APPROVED' && current.driverId === (input.driverId ?? null)) {
+        return null;
+      }
       await this.applyUpdate(tx, current, {
         status: 'RETURN_APPROVED',
         driverId: input.driverId ?? null,
@@ -442,6 +446,12 @@ export class ShipmentsService {
       await this.returns.onApproved(tx, current, staff, input.driverId ?? null);
       return this.findScoped(tx, staff, id);
     });
+    if (!shipment) {
+      return this.toDetails(
+        this.prisma.client,
+        await this.findScoped(this.prisma.client, staff, id),
+      );
+    }
     await this.audit.record({
       action: 'RETURN_APPROVED',
       actorUserId: staff.id,

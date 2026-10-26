@@ -58,6 +58,8 @@ export function CreateShipmentScreen() {
   }, [destinationZoneId, pickupZoneId, requestQuote]);
 
   function submit(addAnother: boolean) {
+    // The previous "created" notice belongs to the previous shipment.
+    setCreated(null);
     const values = validate(createShipmentSchema, {
       ...form,
       destinationZoneId,

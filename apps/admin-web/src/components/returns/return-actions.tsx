@@ -99,8 +99,12 @@ export function ReturnInfoBlock({
         {canApprove &&
         (shipmentStatus === 'RETURN_REQUESTED' || shipmentStatus === 'RETURN_APPROVED') ? (
           <InlineAction
-            label={t('returns.approve')}
-            variant="default"
+            label={
+              shipmentStatus === 'RETURN_APPROVED'
+                ? t('returns.changeDriver')
+                : t('returns.approve')
+            }
+            variant={shipmentStatus === 'RETURN_APPROVED' ? 'outline' : 'default'}
             pending={approve.isPending}
             error={approve.error}
             onSubmit={(form) =>

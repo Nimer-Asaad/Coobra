@@ -3,6 +3,7 @@ export const en = {
     appName: 'COOBRA',
     loading: 'Loading…',
     retry: 'Try again',
+    pageErrorTitle: 'This page could not load',
     save: 'Save',
     cancel: 'Cancel',
     back: 'Back',
@@ -365,6 +366,8 @@ export const en = {
       MERCHANT_ACCEPTS: 'Merchant accepts it',
     },
     propose: 'Propose',
+    whoBears: 'Who bears the shortage',
+    shortfallResolution: 'How to resolve the shortfall',
     expected: 'Expected',
     collected: 'Collected',
     outstanding: 'Outstanding',
@@ -376,6 +379,9 @@ export const en = {
     feeCorrectionHint:
       'The fee was already charged. A correction reverses it and charges the new fee after a second person approves.',
     empty: 'Nothing here.',
+    actionDone: 'Saved.',
+    feeCorrectionRequested: 'Correction sent. It applies after a second person approves it.',
+    feeCorrectionPending: 'Fee correction waiting for approval: {{from}} → {{to}}',
     cod: {
       title: 'Cash on delivery',
       status: {
@@ -430,6 +436,7 @@ export const en = {
     setFee: 'Set return fee',
     waive: 'Waive the fee',
     approve: 'Approve return',
+    changeDriver: 'Change return driver',
     returnDriver: 'Return driver',
     officePickup: 'No driver: the merchant collects it at the office',
     requestReason: 'Return reason',
@@ -690,7 +697,7 @@ export const en = {
     ZONE_INVALID: 'This area does not exist.',
     ZONE_INACTIVE: 'Deliveries to this area are currently unavailable.',
     ORIGIN_ZONE_REQUIRED:
-      'Set your pickup area first (Settings), or choose where the shipment starts.',
+      'Your pickup area is not approved yet. Request it here or in Settings; you can create shipments once COOBRA approves it.',
     FEE_OVERRIDE_NOT_ALLOWED:
       'The fee can no longer be changed directly. Use a financial correction.',
     CONFLICT: 'This record was changed in the meantime. Reload and try again.',
@@ -707,6 +714,7 @@ export const en = {
     INVALID_STATE: 'This action is not possible in the current state. Reload and check.',
     INSUFFICIENT_FUNDS: 'There are not enough confirmed funds for this.',
     DUPLICATE_POSTING: 'This was already recorded.',
+    SERVICE_UNAVAILABLE: 'COOBRA is temporarily unavailable. Try again in a moment.',
     NETWORK: 'Cannot reach the server. Check your connection and try again.',
   },
   email: {

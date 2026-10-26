@@ -5,6 +5,7 @@ export const ar: TranslationResource = {
     appName: 'كوبرا',
     loading: 'جارٍ التحميل…',
     retry: 'حاول مرة أخرى',
+    pageErrorTitle: 'تعذّر تحميل هذه الصفحة',
     save: 'حفظ',
     cancel: 'إلغاء',
     back: 'رجوع',
@@ -357,6 +358,8 @@ export const ar: TranslationResource = {
       MERCHANT_ACCEPTS: 'التاجر يقبله',
     },
     propose: 'اقتراح',
+    whoBears: 'من يتحمّل العجز',
+    shortfallResolution: 'طريقة معالجة النقص',
     expected: 'المطلوب',
     collected: 'المحصّل',
     outstanding: 'المتبقي',
@@ -368,6 +371,9 @@ export const ar: TranslationResource = {
     feeCorrectionHint:
       'الرسوم مسجّلة مسبقاً. التصحيح يعكسها ويسجّل الرسوم الجديدة بعد اعتماد شخص آخر.',
     empty: 'لا يوجد شيء هنا.',
+    actionDone: 'تم الحفظ.',
+    feeCorrectionRequested: 'تم إرسال التصحيح. يُطبّق بعد اعتماد شخص آخر.',
+    feeCorrectionPending: 'تصحيح رسوم بانتظار الاعتماد: {{from}} ← {{to}}',
     cod: {
       title: 'التحصيل عند الاستلام',
       status: {
@@ -422,6 +428,7 @@ export const ar: TranslationResource = {
     setFee: 'تحديد رسوم الإرجاع',
     waive: 'إعفاء من الرسوم',
     approve: 'اعتماد الإرجاع',
+    changeDriver: 'تغيير سائق الإرجاع',
     returnDriver: 'سائق الإرجاع',
     officePickup: 'بدون سائق: يستلمها التاجر من المكتب',
     requestReason: 'سبب الإرجاع',
@@ -679,7 +686,8 @@ export const ar: TranslationResource = {
     QUOTE_INVALID: 'انتهت صلاحية عرض السعر أو استُخدم من قبل. اطلب سعراً جديداً.',
     ZONE_INVALID: 'هذه المنطقة غير موجودة.',
     ZONE_INACTIVE: 'التوصيل لهذه المنطقة غير متاح حالياً.',
-    ORIGIN_ZONE_REQUIRED: 'حدّد منطقة الاستلام أولاً (من الإعدادات) أو اختر من أين تنطلق الشحنة.',
+    ORIGIN_ZONE_REQUIRED:
+      'منطقة الاستلام لم تُعتمد بعد. اطلبها من هنا أو من الإعدادات، وتستطيع إنشاء الشحنات بعد اعتماد كوبرا لها.',
     FEE_OVERRIDE_NOT_ALLOWED: 'لم يعد بالإمكان تعديل الرسوم مباشرة. استخدم تصحيحاً مالياً.',
     CONFLICT: 'تغيّر هذا السجل في هذه الأثناء. أعد التحميل وحاول مرة أخرى.',
     SELF_APPROVAL_FORBIDDEN: 'لا يمكنك اعتماد شيء أنشأته أو اقترحته بنفسك. اطلب ذلك من زميل.',
@@ -691,6 +699,7 @@ export const ar: TranslationResource = {
     INVALID_STATE: 'هذا الإجراء غير ممكن في الحالة الحالية. أعد التحميل وتحقّق.',
     INSUFFICIENT_FUNDS: 'لا توجد أموال مؤكدة كافية لذلك.',
     DUPLICATE_POSTING: 'تم تسجيل هذا من قبل.',
+    SERVICE_UNAVAILABLE: 'خدمة كوبرا غير متاحة مؤقتاً. حاول مرة أخرى بعد قليل.',
     NETWORK: 'تعذّر الاتصال بالخادم. تحقّق من اتصالك وحاول مرة أخرى.',
   },
   email: {

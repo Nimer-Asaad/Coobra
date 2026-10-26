@@ -5,6 +5,7 @@ import {
   registerMerchantSchema,
   toFieldErrors,
   createUserSchema,
+  phoneSchema,
 } from './validation.js';
 
 const validMerchant = {
@@ -77,5 +78,38 @@ describe('createUserSchema', () => {
       language: 'en',
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// QA BUG-001: account phones must accept the same input as recipient phones.
+describe('phoneSchema (account phones)', () => {
+  it.each([
+    ['٠٥٩٩١١١٢٢٢', '0599111222'],
+    ['۰۵۹۹۱۱۱۲۲۲', '0599111222'],
+    ['059-911 1222', '0599111222'],
+    ['00970599111222', '+970599111222'],
+    ['+970599111222', '+970599111222'],
+  ])('normalises %s to %s', (input, expected) => {
+    expect(phoneSchema.parse(input)).toBe(expected);
+  });
+
+  it('still rejects invalid numbers', () => {
+    expect(phoneSchema.safeParse('05x9').success).toBe(false);
+    expect(phoneSchema.safeParse('١٢٣').success).toBe(false);
+  });
+
+  it('normalises on merchant registration and on staff/driver accounts', () => {
+    expect(registerMerchantSchema.parse({ ...validMerchant, phone: '٠٥٩٩١١١٢٢٢' }).phone).toBe(
+      '0599111222',
+    );
+    expect(
+      createUserSchema.parse({
+        fullName: 'Driver',
+        email: 'd@b.co',
+        role: 'DRIVER',
+        language: 'ar',
+        phone: '٠٥٩٩٠٠٠٠٠٢',
+      }).phone,
+    ).toBe('0599000002');
   });
 });

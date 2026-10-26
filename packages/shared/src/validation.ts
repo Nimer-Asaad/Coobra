@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CLIENT_APPS, ADMIN_ASSIGNABLE_ROLES } from './roles.js';
 import { SUPPORTED_LANGUAGES } from './language.js';
+import { normalizePhone } from './shipments.js';
 
 /*
  * Validation messages are i18n keys (see @coobra/i18n `validation.*`), so the same
@@ -39,10 +40,15 @@ const nameSchema = z
   .min(2, { error: 'validation.name.tooShort' })
   .max(120, { error: 'validation.name.tooLong' });
 
+/**
+ * Account phone numbers (merchant registration, staff and driver accounts). Normalised like
+ * recipient phones first, so Arabic-Indic digits, spaces, dashes and a 00 prefix are accepted.
+ */
 export const phoneSchema = z
   .string({ error: 'validation.required' })
   .trim()
-  .regex(/^\+?[0-9]{7,15}$/, { error: 'validation.phone.invalid' });
+  .transform(normalizePhone)
+  .pipe(z.string().regex(/^\+?[0-9]{7,15}$/, { error: 'validation.phone.invalid' }));
 
 const tokenSchema = z
   .string({ error: 'validation.token.invalid' })

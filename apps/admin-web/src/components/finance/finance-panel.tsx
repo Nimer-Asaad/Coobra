@@ -527,7 +527,7 @@ function DriversTab({ canManage }: { canManage: boolean }) {
             <NativeSelect
               name="responsibility"
               defaultValue="DRIVER_LIABLE"
-              aria-label={t('finance.reason')}
+              aria-label={t('finance.whoBears')}
             >
               <option value="DRIVER_LIABLE">{t('finance.responsibility.DRIVER_LIABLE')}</option>
               <option value="COMPANY_ABSORBS">{t('finance.responsibility.COMPANY_ABSORBS')}</option>
@@ -1163,7 +1163,7 @@ function ShortfallRow({
           <NativeSelect
             name="resolution"
             defaultValue="COMPANY_ABSORBS"
-            aria-label={t('finance.propose')}
+            aria-label={t('finance.shortfallResolution')}
           >
             {PROPOSABLE_SHORTFALL_RESOLUTIONS.map((resolution) => (
               <option key={resolution} value={resolution}>

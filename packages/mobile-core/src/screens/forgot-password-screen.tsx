@@ -41,6 +41,7 @@ export function ForgotPasswordScreen() {
             keyboardType="email-address"
             forceLtr
             error={fieldErrors.email}
+            onSubmitEditing={submit}
           />
           <AppButton title={t('auth.forgot.submit')} onPress={submit} loading={request.isPending} />
         </>

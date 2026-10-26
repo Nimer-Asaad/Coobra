@@ -304,6 +304,7 @@ function TransitionAction({
         shipment={shipment}
         loading={transition.isPending}
         error={transition.error}
+        onEdit={() => transition.reset()}
         onCancel={() => setOpen(false)}
         onSubmit={(cod) => transition.mutate({ toStatus: rule.to, cod }, { onSuccess: finish })}
       />
@@ -318,7 +319,10 @@ function TransitionAction({
           label={t('shipments.actions.reason')}
           placeholder={t('shipments.actions.reasonPlaceholder')}
           value={reason}
-          onChangeText={setReason}
+          onChangeText={(value) => {
+            setReason(value);
+            transition.reset();
+          }}
           multiline
           error={reasonError}
           testID={`reason-${rule.to}`}
@@ -350,11 +354,14 @@ function DeliverPanel({
   loading,
   error,
   onSubmit,
+  onEdit,
   onCancel,
 }: {
   shipment: ShipmentDetails;
   loading: boolean;
   error: unknown;
+  /** Any answer changed: the previous attempt's error no longer applies. */
+  onEdit: () => void;
   onSubmit: (cod: {
     collected: boolean;
     amount: string;
@@ -370,6 +377,12 @@ function DeliverPanel({
   const [amount, setAmount] = useState('');
   const [partialReason, setPartialReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
+  const edit =
+    <V,>(set: (value: V) => void) =>
+    (value: V) => {
+      set(value);
+      onEdit();
+    };
   const expected = formatMoney(shipment.codAmount, language);
   // Exact comparison in cents (never floating point); the server re-validates everything.
   const typed = toCents(amount);
@@ -393,13 +406,13 @@ function DeliverPanel({
             <Choice
               label={t('shipments.deliver.collectedYes')}
               selected={collected === true}
-              onPress={() => setCollected(true)}
+              onPress={() => edit(setCollected)(true)}
               testID="cod-yes"
             />
             <Choice
               label={t('shipments.deliver.collectedNo')}
               selected={collected === false}
-              onPress={() => setCollected(false)}
+              onPress={() => edit(setCollected)(false)}
               testID="cod-no"
             />
           </Row>
@@ -407,7 +420,7 @@ function DeliverPanel({
             <TextField
               label={t('shipments.deliver.amount')}
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={edit(setAmount)}
               keyboardType="decimal-pad"
               forceLtr
               testID="cod-amount"
@@ -419,7 +432,8 @@ function DeliverPanel({
               <TextField
                 label={t('finance.cod.partialReason')}
                 value={partialReason}
-                onChangeText={setPartialReason}
+                onChangeText={edit(setPartialReason)}
+                hint={partialReason.trim().length < 3 ? t('validation.reason.required') : undefined}
                 multiline
                 testID="cod-partial-reason"
               />
@@ -433,7 +447,7 @@ function DeliverPanel({
       <Choice
         label={t('shipments.deliver.confirmCheck')}
         selected={confirmed}
-        onPress={() => setConfirmed((value) => !value)}
+        onPress={() => edit(setConfirmed)(!confirmed)}
         checkbox
         testID="deliver-confirm-check"
       />
@@ -473,7 +487,8 @@ function Choice({
   return (
     <Pressable
       accessibilityRole={checkbox ? 'checkbox' : 'radio'}
-      accessibilityState={checkbox ? { checked: selected } : { selected }}
+      accessibilityLabel={label}
+      accessibilityState={{ checked: selected }}
       onPress={onPress}
       style={[styles.choice, selected && styles.choiceSelected, checkbox && styles.checkbox]}
       testID={testID}
