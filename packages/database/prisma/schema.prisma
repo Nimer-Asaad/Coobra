@@ -61,31 +61,71 @@ model User {
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")
 
-  createdBy         User?                   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdUsers      User[]                  @relation("UserCreatedBy")
-  merchantProfile   MerchantProfile?
-  sessions          Session[]
-  authTokens        AuthToken[]
-  auditLogsAsActor  AuditLog[]              @relation("AuditActor")
-  auditLogsAsTarget AuditLog[]              @relation("AuditTarget")
-  merchantShipments Shipment[]              @relation("ShipmentMerchant")
-  createdShipments  Shipment[]              @relation("ShipmentCreator")
-  driverShipments   Shipment[]              @relation("ShipmentDriver")
-  statusChanges     ShipmentStatusHistory[] @relation("ShipmentHistoryActor")
-  historyAsDriver   ShipmentStatusHistory[] @relation("ShipmentHistoryDriver")
-  codCollections    CodCollection[]         @relation("CodCollectionDriver")
+  createdBy            User?                   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers         User[]                  @relation("UserCreatedBy")
+  merchantProfile      MerchantProfile?
+  sessions             Session[]
+  authTokens           AuthToken[]
+  auditLogsAsActor     AuditLog[]              @relation("AuditActor")
+  auditLogsAsTarget    AuditLog[]              @relation("AuditTarget")
+  merchantShipments    Shipment[]              @relation("ShipmentMerchant")
+  createdShipments     Shipment[]              @relation("ShipmentCreator")
+  driverShipments      Shipment[]              @relation("ShipmentDriver")
+  statusChanges        ShipmentStatusHistory[] @relation("ShipmentHistoryActor")
+  historyAsDriver      ShipmentStatusHistory[] @relation("ShipmentHistoryDriver")
+  codCollections       CodCollection[]         @relation("CodCollectionDriver")
+  pricingRules         PricingRule[]           @relation("PricingRuleMerchant")
+  createdPricingRules  PricingRule[]           @relation("PricingRuleCreator")
+  pricingQuotes        PricingQuote[]          @relation("PricingQuoteMerchant")
+  feeOverrides         ShipmentFeeOverride[]   @relation("FeeOverrideActor")
+  approvedFeeOverrides ShipmentFeeOverride[]   @relation("FeeOverrideApprover")
+  financialAccounts    FinancialAccount[]      @relation("FinancialAccountOwner")
+  journalEntries       JournalEntry[]          @relation("JournalEntryCreator")
+  merchantShortfalls   CodShortfall[]          @relation("ShortfallMerchant")
+  driverShortfalls     CodShortfall[]          @relation("ShortfallDriver")
+  proposedShortfalls   CodShortfall[]          @relation("ShortfallProposer")
+  decidedShortfalls    CodShortfall[]          @relation("ShortfallDecider")
+  merchantAdjustments  FinancialAdjustment[]   @relation("AdjustmentMerchant")
+  requestedAdjustments FinancialAdjustment[]   @relation("AdjustmentRequester")
+  decidedAdjustments   FinancialAdjustment[]   @relation("AdjustmentDecider")
+  settingChanges       FinanceSettingChange[]  @relation("SettingChanger")
+  driverSettlements    DriverSettlement[]      @relation("SettlementDriver")
+  submittedSettlements DriverSettlement[]      @relation("SettlementSubmitter")
+  decidedSettlements   DriverSettlement[]      @relation("SettlementDecider")
+  driverShortages      DriverCashShortage[]    @relation("ShortageDriver")
+  proposedShortages    DriverCashShortage[]    @relation("ShortageProposer")
+  decidedShortages     DriverCashShortage[]    @relation("ShortageDecider")
+  driverRepayments     DriverRepayment[]       @relation("RepaymentDriver")
+  recordedRepayments   DriverRepayment[]       @relation("RepaymentRecorder")
+  merchantPayouts      MerchantPayout[]        @relation("PayoutMerchant")
+  createdPayouts       MerchantPayout[]        @relation("PayoutCreator")
+  approvedPayouts      MerchantPayout[]        @relation("PayoutApprover")
+  paidPayouts          MerchantPayout[]        @relation("PayoutPayer")
+  cancelledPayouts     MerchantPayout[]        @relation("PayoutCanceller")
+  merchantPayments     MerchantPayment[]       @relation("MerchantPaymentMerchant")
+  recordedPayments     MerchantPayment[]       @relation("MerchantPaymentRecorder")
+  treasuryTransfers    TreasuryTransfer[]      @relation("TransferRecorder")
+  requestedReturns     ReturnRecord[]          @relation("ReturnRequester")
+  approvedReturns      ReturnRecord[]          @relation("ReturnApprover")
+  returnTasks          ReturnRecord[]          @relation("ReturnDriver")
+  returnFeeDecisions   ReturnRecord[]          @relation("ReturnFeeSetter")
+  pickupZoneRequests   PickupZoneRequest[]     @relation("PickupRequestMerchant")
+  pickupZoneDecisions  PickupZoneRequest[]     @relation("PickupRequestDecider")
 
   @@index([role])
   @@map("users")
 }
 
 model MerchantProfile {
-  userId       String   @id @map("user_id") @db.Uuid
-  businessName String   @map("business_name")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  userId              String   @id @map("user_id") @db.Uuid
+  businessName        String   @map("business_name")
+  /// Phase 3: default origin zone used for pricing (nullable for existing merchants).
+  defaultPickupZoneId String?  @map("default_pickup_zone_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultPickupZone Zone? @relation("MerchantPickupZone", fields: [defaultPickupZoneId], references: [id], onDelete: Restrict)
 
   @@map("merchant_profiles")
 }
@@ -160,6 +200,13 @@ enum ShipmentStatus {
   DELIVERED
   DELIVERY_FAILED
   RETURN_REQUESTED
+  /// Phase 3: return approved/scheduled, usually with a return driver.
+  RETURN_APPROVED
+  /// Phase 3: the driver is carrying the parcel back.
+  RETURN_IN_TRANSIT
+  /// Phase 3: back at the company hub, waiting for the merchant.
+  RETURNED_TO_HUB
+  /// Returned to the merchant (final).
   RETURNED
   CANCELLED
 }
@@ -203,16 +250,30 @@ model Shipment {
   failureReason      String?        @map("failure_reason")
   cancellationReason String?        @map("cancellation_reason")
   returnReason       String?        @map("return_reason")
+  /// Phase 3: cash-on-delivery progress (separate from the delivery status).
+  codStatus          CodStatus      @default(PENDING) @map("cod_status")
+  codCollectedAmount Decimal        @default(0) @map("cod_collected_amount") @db.Decimal(12, 2)
+  /// Phase 3: pricing zones (nullable for Phase 2 shipments).
+  originZoneId       String?        @map("origin_zone_id") @db.Uuid
+  destinationZoneId  String?        @map("destination_zone_id") @db.Uuid
   /// Optimistic concurrency token, incremented on every change.
   version            Int            @default(0)
   createdAt          DateTime       @default(now()) @map("created_at")
   updatedAt          DateTime       @updatedAt @map("updated_at")
 
-  merchant       User                    @relation("ShipmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
-  createdBy      User?                   @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  driver         User?                   @relation("ShipmentDriver", fields: [driverId], references: [id], onDelete: Restrict)
-  history        ShipmentStatusHistory[]
-  codCollections CodCollection[]
+  merchant        User                    @relation("ShipmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  createdBy       User?                   @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  driver          User?                   @relation("ShipmentDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  history         ShipmentStatusHistory[]
+  codCollections  CodCollection[]
+  originZone      Zone?                   @relation("ShipmentOriginZone", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone?                   @relation("ShipmentDestinationZone", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  pricing         ShipmentPricing?
+  feeOverrides    ShipmentFeeOverride[]
+  pricingQuote    PricingQuote?
+  shortfall       CodShortfall?
+  returnRecord    ReturnRecord?
+  journalLines    JournalLine[]
 
   @@index([merchantId, createdAt(sort: Desc)])
   @@index([driverId, status])
@@ -220,6 +281,7 @@ model Shipment {
   @@index([governorate])
   @@index([recipientPhone])
   @@index([createdAt(sort: Desc)])
+  @@index([destinationZoneId])
   @@map("shipments")
 }
 
@@ -257,11 +319,717 @@ model CodCollection {
   collectedAmount Decimal  @map("collected_amount") @db.Decimal(12, 2)
   currency        Currency @default(ILS)
   recordedAt      DateTime @default(now()) @map("recorded_at")
+  /// Phase 3: portion handed to the company (settlement) or resolved as a driver cash shortage.
+  clearedAmount   Decimal  @default(0) @map("cleared_amount") @db.Decimal(12, 2)
+  /// Phase 3: client-supplied key for follow-up collections (prevents double posting).
+  idempotencyKey  String?  @unique @map("idempotency_key")
+  note            String?
 
-  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  driver   User     @relation("CodCollectionDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  shipment  Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  driver    User           @relation("CodCollectionDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  clearings CashClearing[]
 
   @@index([shipmentId])
   @@index([driverId, recordedAt])
   @@map("cod_collections")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — zones and pricing
+// ---------------------------------------------------------------------------
+
+/// Configurable labels for zone levels (region, governorate, city, town, subzone, …).
+model ZoneKind {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  code      String   @unique
+  nameAr    String   @map("name_ar")
+  nameEn    String   @map("name_en")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  zones Zone[]
+
+  @@map("zone_kinds")
+}
+
+/// Hierarchical delivery zone. `code` is the stable identifier; names are for display only.
+/// The parent is fixed at creation, so `depth` (0 = root) never changes.
+model Zone {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  code      String   @unique
+  kindId    String   @map("kind_id") @db.Uuid
+  parentId  String?  @map("parent_id") @db.Uuid
+  depth     Int      @default(0)
+  nameAr    String   @map("name_ar")
+  nameEn    String   @map("name_en")
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  kind     ZoneKind @relation(fields: [kindId], references: [id], onDelete: Restrict)
+  parent   Zone?    @relation("ZoneTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Zone[]   @relation("ZoneTree")
+
+  merchantPickups      MerchantProfile[]   @relation("MerchantPickupZone")
+  originShipments      Shipment[]          @relation("ShipmentOriginZone")
+  destinationShipments Shipment[]          @relation("ShipmentDestinationZone")
+  originRules          PricingRule[]       @relation("PricingRuleOrigin")
+  destinationRules     PricingRule[]       @relation("PricingRuleDestination")
+  requestedPickups     PickupZoneRequest[] @relation("PickupRequestZone")
+  previousPickups      PickupZoneRequest[] @relation("PickupRequestPreviousZone")
+
+  @@index([parentId])
+  @@map("zones")
+}
+
+enum PricingSource {
+  MERCHANT_ROUTE
+  GENERAL_ROUTE
+  MERCHANT_FALLBACK
+  GENERAL_FALLBACK
+  MANUAL
+  LEGACY
+}
+
+/// A versioned delivery price. Editing creates a new version (same `ruleGroupId`) and deactivates
+/// the previous one, so the rule a shipment was priced with is always preserved.
+model PricingRule {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  ruleGroupId       String    @map("rule_group_id") @db.Uuid
+  version           Int       @default(1)
+  /// Null = general rule; otherwise only for this merchant.
+  merchantId        String?   @map("merchant_id") @db.Uuid
+  originZoneId      String?   @map("origin_zone_id") @db.Uuid
+  destinationZoneId String?   @map("destination_zone_id") @db.Uuid
+  /// Explicit fallback: applies when no route rule matches (zones must be null).
+  isFallback        Boolean   @default(false) @map("is_fallback")
+  deliveryFee       Decimal   @map("delivery_fee") @db.Decimal(12, 2)
+  /// Null = return fee not configured (RETURN_FEE_UNCONFIGURED).
+  returnFee         Decimal?  @map("return_fee") @db.Decimal(12, 2)
+  currency          Currency  @default(ILS)
+  priority          Int       @default(0)
+  effectiveFrom     DateTime  @default(now()) @map("effective_from")
+  effectiveTo       DateTime? @map("effective_to")
+  active            Boolean   @default(true)
+  note              String?
+  createdById       String?   @map("created_by_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
+  supersededAt      DateTime? @map("superseded_at")
+
+  merchant        User?             @relation("PricingRuleMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  originZone      Zone?             @relation("PricingRuleOrigin", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone?             @relation("PricingRuleDestination", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  createdBy       User?             @relation("PricingRuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  quotes          PricingQuote[]
+  snapshots       ShipmentPricing[]
+
+  @@unique([ruleGroupId, version])
+  @@index([active, merchantId])
+  @@index([originZoneId, destinationZoneId])
+  @@map("pricing_rules")
+}
+
+enum PickupZoneRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+/// A merchant's request to change their pickup zone. Prices use the approved zone on the
+/// merchant profile; a request only takes effect when staff approve it. At most one PENDING
+/// request per merchant (partial unique index in migration 20261026100000_pickup_zone_requests).
+model PickupZoneRequest {
+  id              String                  @id @default(uuid(7)) @db.Uuid
+  merchantId      String                  @map("merchant_id") @db.Uuid
+  requestedZoneId String                  @map("requested_zone_id") @db.Uuid
+  /// The approved zone when the request was made.
+  previousZoneId  String?                 @map("previous_zone_id") @db.Uuid
+  status          PickupZoneRequestStatus @default(PENDING)
+  /// Staff who approved or rejected; null while pending or when the merchant withdrew.
+  decidedById     String?                 @map("decided_by_id") @db.Uuid
+  decidedAt       DateTime?               @map("decided_at")
+  decisionNote    String?                 @map("decision_note")
+  createdAt       DateTime                @default(now()) @map("created_at")
+
+  merchant      User  @relation("PickupRequestMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  requestedZone Zone  @relation("PickupRequestZone", fields: [requestedZoneId], references: [id], onDelete: Restrict)
+  previousZone  Zone? @relation("PickupRequestPreviousZone", fields: [previousZoneId], references: [id], onDelete: Restrict)
+  decidedBy     User? @relation("PickupRequestDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([merchantId, createdAt])
+  @@map("pickup_zone_requests")
+}
+
+/// A single-use price quote shown to a merchant, valid until `expiresAt`.
+model PricingQuote {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  merchantId        String        @map("merchant_id") @db.Uuid
+  originZoneId      String        @map("origin_zone_id") @db.Uuid
+  destinationZoneId String        @map("destination_zone_id") @db.Uuid
+  ruleId            String        @map("rule_id") @db.Uuid
+  ruleVersion       Int           @map("rule_version")
+  source            PricingSource
+  deliveryFee       Decimal       @map("delivery_fee") @db.Decimal(12, 2)
+  returnFee         Decimal?      @map("return_fee") @db.Decimal(12, 2)
+  currency          Currency      @default(ILS)
+  createdById       String        @map("created_by_id") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at")
+  expiresAt         DateTime      @map("expires_at")
+  usedAt            DateTime?     @map("used_at")
+  shipmentId        String?       @unique @map("shipment_id") @db.Uuid
+
+  merchant User        @relation("PricingQuoteMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  rule     PricingRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  shipment Shipment?   @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+
+  @@index([merchantId, createdAt])
+  @@map("pricing_quotes")
+}
+
+/// Immutable record of how a shipment was priced. Rule changes never touch it.
+model ShipmentPricing {
+  shipmentId        String        @id @map("shipment_id") @db.Uuid
+  quoteId           String?       @unique @map("quote_id") @db.Uuid
+  ruleId            String?       @map("rule_id") @db.Uuid
+  ruleVersion       Int?          @map("rule_version")
+  source            PricingSource
+  originZoneId      String?       @map("origin_zone_id") @db.Uuid
+  destinationZoneId String?       @map("destination_zone_id") @db.Uuid
+  /// Automatically calculated fee (null when no rule applied).
+  baseFee           Decimal?      @map("base_fee") @db.Decimal(12, 2)
+  /// Fee charged when priced (later changes are recorded as overrides).
+  finalFee          Decimal       @map("final_fee") @db.Decimal(12, 2)
+  /// Return fee from the rule; null = not configured.
+  returnFee         Decimal?      @map("return_fee") @db.Decimal(12, 2)
+  currency          Currency      @default(ILS)
+  pricedAt          DateTime      @default(now()) @map("priced_at")
+  pricedById        String?       @map("priced_by_id") @db.Uuid
+
+  shipment Shipment     @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  rule     PricingRule? @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+
+  @@map("shipment_pricing")
+}
+
+enum FeeOverridePhase {
+  PRE_DELIVERY
+  POST_DELIVERY
+}
+
+enum ApprovalStatus {
+  APPLIED
+  PENDING_APPROVAL
+  REJECTED
+}
+
+/// Append-only history of manual delivery-fee changes (reason mandatory).
+model ShipmentFeeOverride {
+  id           String           @id @default(uuid(7)) @db.Uuid
+  shipmentId   String           @map("shipment_id") @db.Uuid
+  phase        FeeOverridePhase
+  status       ApprovalStatus
+  previousFee  Decimal?         @map("previous_fee") @db.Decimal(12, 2)
+  newFee       Decimal          @map("new_fee") @db.Decimal(12, 2)
+  reason       String
+  actorId      String           @map("actor_id") @db.Uuid
+  actorRole    UserRole         @map("actor_role")
+  approvedById String?          @map("approved_by_id") @db.Uuid
+  decidedAt    DateTime?        @map("decided_at")
+  decisionNote String?          @map("decision_note")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  actor      User     @relation("FeeOverrideActor", fields: [actorId], references: [id], onDelete: Restrict)
+  approvedBy User?    @relation("FeeOverrideApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([shipmentId, createdAt])
+  @@map("shipment_fee_overrides")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — ledger, COD shortfalls, adjustments and finance settings
+// ---------------------------------------------------------------------------
+
+enum CodStatus {
+  NOT_REQUIRED
+  PENDING
+  PARTIAL
+  COLLECTED
+  SHORTFALL_RESOLVED
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  REVENUE
+  EXPENSE
+}
+
+enum AccountPurpose {
+  COMPANY_CASH_HUB
+  COMPANY_BANK
+  COMPANY_EWALLET
+  DRIVER_CUSTODY
+  DRIVER_RECEIVABLE
+  MERCHANT_COD_PENDING
+  MERCHANT_BALANCE
+  DELIVERY_FEE_REVENUE
+  RETURN_FEE_REVENUE
+  COD_SHORTFALL_EXPENSE
+  DRIVER_CASH_LOSS_EXPENSE
+  ADJUSTMENT_EXPENSE
+}
+
+/// Ledger account. Company accounts have no owner; driver/merchant accounts one per person.
+model FinancialAccount {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  /// e.g. COMPANY_CASH_HUB or MERCHANT_BALANCE:<user id>
+  code        String         @unique
+  purpose     AccountPurpose
+  type        AccountType
+  ownerUserId String?        @map("owner_user_id") @db.Uuid
+  currency    Currency       @default(ILS)
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  owner User?         @relation("FinancialAccountOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  lines JournalLine[]
+
+  @@index([purpose])
+  @@map("financial_accounts")
+}
+
+enum JournalKind {
+  COD_COLLECTION
+  DELIVERY_FEE
+  RETURN_FEE
+  FEE_ADJUSTMENT
+  DRIVER_SETTLEMENT
+  DRIVER_CASH_SHORTAGE
+  DRIVER_REPAYMENT
+  COD_SHORTFALL
+  MERCHANT_PAYOUT
+  MERCHANT_PAYMENT
+  TREASURY_TRANSFER
+  MERCHANT_ADJUSTMENT
+  REVERSAL
+  PHASE2_BACKFILL
+}
+
+/// Immutable, balanced journal entry (enforced by database triggers).
+/// Two partial unique indexes (migration 20261026090000_journal_source_guards, not expressible
+/// here) allow one posting per COD collection and one per shipment delivery fee across the live
+/// path and the Phase 2 backfill.
+model JournalEntry {
+  id           String      @id @default(uuid(7)) @db.Uuid
+  kind         JournalKind
+  /// Business reference, unique per kind: one posting per source.
+  sourceType   String      @map("source_type")
+  sourceId     String      @map("source_id")
+  reversalOfId String?     @unique @map("reversal_of_id") @db.Uuid
+  description  String?
+  currency     Currency    @default(ILS)
+  createdById  String?     @map("created_by_id") @db.Uuid
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  createdBy  User?         @relation("JournalEntryCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reversalOf JournalEntry? @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy JournalEntry? @relation("JournalReversal")
+  lines      JournalLine[]
+
+  @@unique([kind, sourceType, sourceId])
+  @@index([createdAt])
+  @@map("journal_entries")
+}
+
+enum EntrySide {
+  DEBIT
+  CREDIT
+}
+
+model JournalLine {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  entryId    String    @map("entry_id") @db.Uuid
+  accountId  String    @map("account_id") @db.Uuid
+  side       EntrySide
+  amount     Decimal   @db.Decimal(14, 2)
+  shipmentId String?   @map("shipment_id") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  entry    JournalEntry     @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  account  FinancialAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  shipment Shipment?        @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt])
+  @@index([entryId])
+  @@index([shipmentId])
+  @@map("journal_lines")
+}
+
+enum ShortfallStatus {
+  OPEN
+  PENDING_APPROVAL
+  AWAITING_MERCHANT
+  RESOLVED
+}
+
+enum ShortfallResolution {
+  COLLECTED
+  COMPANY_ABSORBS
+  DRIVER_RESPONSIBLE
+  MERCHANT_ACCEPTS
+}
+
+/// A recipient paid less than the COD. Never assigned to the merchant automatically.
+model CodShortfall {
+  id                 String               @id @default(uuid(7)) @db.Uuid
+  shipmentId         String               @unique @map("shipment_id") @db.Uuid
+  merchantId         String               @map("merchant_id") @db.Uuid
+  driverId           String               @map("driver_id") @db.Uuid
+  expectedAmount     Decimal              @map("expected_amount") @db.Decimal(12, 2)
+  /// The driver's explanation at delivery.
+  reason             String
+  status             ShortfallStatus      @default(OPEN)
+  proposedResolution ShortfallResolution? @map("proposed_resolution")
+  proposedAmount     Decimal?             @map("proposed_amount") @db.Decimal(12, 2)
+  proposalNote       String?              @map("proposal_note")
+  proposedById       String?              @map("proposed_by_id") @db.Uuid
+  proposedAt         DateTime?            @map("proposed_at")
+  resolution         ShortfallResolution?
+  resolvedAmount     Decimal?             @map("resolved_amount") @db.Decimal(12, 2)
+  decidedById        String?              @map("decided_by_id") @db.Uuid
+  decidedAt          DateTime?            @map("decided_at")
+  decisionNote       String?              @map("decision_note")
+  merchantAcceptedAt DateTime?            @map("merchant_accepted_at")
+  journalEntryId     String?              @unique @map("journal_entry_id") @db.Uuid
+  version            Int                  @default(0)
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  merchant   User     @relation("ShortfallMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  driver     User     @relation("ShortfallDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  proposedBy User?    @relation("ShortfallProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  decidedBy  User?    @relation("ShortfallDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([merchantId, status])
+  @@map("cod_shortfalls")
+}
+
+enum AdjustmentType {
+  MERCHANT_CREDIT
+  MERCHANT_DEBIT
+}
+
+/// A requested manual merchant credit/debit. Posted only after a second person approves it.
+model FinancialAdjustment {
+  id             String         @id @default(uuid(7)) @db.Uuid
+  type           AdjustmentType
+  merchantId     String         @map("merchant_id") @db.Uuid
+  amount         Decimal        @db.Decimal(12, 2)
+  reason         String
+  status         ApprovalStatus @default(PENDING_APPROVAL)
+  requestedById  String         @map("requested_by_id") @db.Uuid
+  decidedById    String?        @map("decided_by_id") @db.Uuid
+  decidedAt      DateTime?      @map("decided_at")
+  decisionNote   String?        @map("decision_note")
+  journalEntryId String?        @unique @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  merchant    User  @relation("AdjustmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  requestedBy User  @relation("AdjustmentRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy   User? @relation("AdjustmentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@map("financial_adjustments")
+}
+
+/// Configurable finance values (e.g. the approval threshold). Every change is kept below.
+model FinanceSetting {
+  key         String   @id
+  value       String
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@map("finance_settings")
+}
+
+model FinanceSettingChange {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  key         String
+  oldValue    String?  @map("old_value")
+  newValue    String   @map("new_value")
+  reason      String
+  changedById String   @map("changed_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  changedBy User @relation("SettingChanger", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([key, createdAt])
+  @@map("finance_setting_changes")
+}
+
+/// Replay protection for money-moving requests (one result per user, scope and key).
+model IdempotencyRecord {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  scope          String
+  key            String
+  requestHash    String    @map("request_hash")
+  responseStatus Int?      @map("response_status")
+  responseBody   Json?     @map("response_body")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+
+  @@unique([userId, scope, key])
+  @@map("idempotency_records")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — driver settlements, cash shortages and repayments
+// ---------------------------------------------------------------------------
+
+enum CashChannel {
+  HUB
+  BANK
+  EWALLET
+}
+
+enum SettlementStatus {
+  SUBMITTED
+  CONFIRMED
+  REJECTED
+}
+
+/// A driver handing collected cash to the company. Partial settlements are allowed: only the
+/// counted amount is cleared (oldest collections first); the rest stays in the driver's custody.
+model DriverSettlement {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  driverId       String           @map("driver_id") @db.Uuid
+  status         SettlementStatus @default(SUBMITTED)
+  declaredAmount Decimal          @map("declared_amount") @db.Decimal(12, 2)
+  countedAmount  Decimal?         @map("counted_amount") @db.Decimal(12, 2)
+  channel        CashChannel      @default(HUB)
+  note           String?
+  submittedById  String           @map("submitted_by_id") @db.Uuid
+  decidedById    String?          @map("decided_by_id") @db.Uuid
+  decidedAt      DateTime?        @map("decided_at")
+  decisionNote   String?          @map("decision_note")
+  journalEntryId String?          @unique @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  driver      User           @relation("SettlementDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  submittedBy User           @relation("SettlementSubmitter", fields: [submittedById], references: [id], onDelete: Restrict)
+  decidedBy   User?          @relation("SettlementDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+  clearings   CashClearing[]
+
+  @@index([driverId, status])
+  @@index([status, createdAt])
+  @@map("driver_settlements")
+}
+
+enum DriverShortageResponsibility {
+  DRIVER_LIABLE
+  COMPANY_ABSORBS
+}
+
+/// Collected cash a driver cannot hand over. Never charged to the merchant: once approved the
+/// merchant's pending COD is released to their balance either way.
+model DriverCashShortage {
+  id             String                       @id @default(uuid(7)) @db.Uuid
+  driverId       String                       @map("driver_id") @db.Uuid
+  amount         Decimal                      @db.Decimal(12, 2)
+  responsibility DriverShortageResponsibility
+  reason         String
+  status         ApprovalStatus               @default(PENDING_APPROVAL)
+  proposedById   String                       @map("proposed_by_id") @db.Uuid
+  decidedById    String?                      @map("decided_by_id") @db.Uuid
+  decidedAt      DateTime?                    @map("decided_at")
+  decisionNote   String?                      @map("decision_note")
+  journalEntryId String?                      @unique @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime                     @default(now()) @map("created_at")
+
+  driver     User           @relation("ShortageDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  proposedBy User           @relation("ShortageProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  decidedBy  User?          @relation("ShortageDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+  clearings  CashClearing[]
+
+  @@index([driverId, status])
+  @@map("driver_cash_shortages")
+}
+
+/// How much of a COD collection a settlement or an approved driver shortage cleared.
+model CashClearing {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  collectionId     String   @map("collection_id") @db.Uuid
+  amount           Decimal  @db.Decimal(12, 2)
+  settlementId     String?  @map("settlement_id") @db.Uuid
+  driverShortageId String?  @map("driver_shortage_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  collection     CodCollection       @relation(fields: [collectionId], references: [id], onDelete: Restrict)
+  settlement     DriverSettlement?   @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  driverShortage DriverCashShortage? @relation(fields: [driverShortageId], references: [id], onDelete: Restrict)
+
+  @@index([collectionId])
+  @@index([settlementId])
+  @@index([driverShortageId])
+  @@map("cash_clearings")
+}
+
+/// A driver paying back an amount they were held liable for.
+model DriverRepayment {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  driverId       String      @map("driver_id") @db.Uuid
+  amount         Decimal     @db.Decimal(12, 2)
+  channel        CashChannel @default(HUB)
+  note           String?
+  recordedById   String      @map("recorded_by_id") @db.Uuid
+  journalEntryId String      @unique @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  driver     User @relation("RepaymentDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  recordedBy User @relation("RepaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([driverId])
+  @@map("driver_repayments")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — merchant payouts, merchant payments and treasury transfers
+// ---------------------------------------------------------------------------
+
+enum PayoutStatus {
+  PENDING_APPROVAL
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  E_WALLET
+  CHEQUE
+}
+
+/// Money paid to a merchant from their funded balance. The approver is never the creator;
+/// approval reserves the amount; payment posts the ledger entry with a unique reference.
+model MerchantPayout {
+  id                  String        @id @default(uuid(7)) @db.Uuid
+  merchantId          String        @map("merchant_id") @db.Uuid
+  amount              Decimal       @db.Decimal(12, 2)
+  method              PaymentMethod
+  status              PayoutStatus  @default(PENDING_APPROVAL)
+  requestedByMerchant Boolean       @default(false) @map("requested_by_merchant")
+  note                String?
+  createdById         String        @map("created_by_id") @db.Uuid
+  approvedById        String?       @map("approved_by_id") @db.Uuid
+  approvedAt          DateTime?     @map("approved_at")
+  paidById            String?       @map("paid_by_id") @db.Uuid
+  paidAt              DateTime?     @map("paid_at")
+  /// Bank/wallet/cheque reference, unique per payment method.
+  reference           String?
+  cancelledById       String?       @map("cancelled_by_id") @db.Uuid
+  cancelledAt         DateTime?     @map("cancelled_at")
+  cancelReason        String?       @map("cancel_reason")
+  journalEntryId      String?       @unique @map("journal_entry_id") @db.Uuid
+  createdAt           DateTime      @default(now()) @map("created_at")
+
+  merchant    User  @relation("PayoutMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  createdBy   User  @relation("PayoutCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy  User? @relation("PayoutApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  paidBy      User? @relation("PayoutPayer", fields: [paidById], references: [id], onDelete: Restrict)
+  cancelledBy User? @relation("PayoutCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+
+  @@unique([method, reference])
+  @@index([merchantId, status])
+  @@index([status, createdAt])
+  @@map("merchant_payouts")
+}
+
+/// A merchant paying the company (e.g. to settle a debit balance from fees).
+model MerchantPayment {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  merchantId     String      @map("merchant_id") @db.Uuid
+  amount         Decimal     @db.Decimal(12, 2)
+  channel        CashChannel
+  reference      String?
+  note           String?
+  recordedById   String      @map("recorded_by_id") @db.Uuid
+  journalEntryId String      @unique @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  merchant   User @relation("MerchantPaymentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  recordedBy User @relation("MerchantPaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([merchantId])
+  @@map("merchant_payments")
+}
+
+/// Moving company money between channels (e.g. depositing hub cash at the bank).
+model TreasuryTransfer {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  fromChannel    CashChannel @map("from_channel")
+  toChannel      CashChannel @map("to_channel")
+  amount         Decimal     @db.Decimal(12, 2)
+  reference      String?
+  recordedById   String      @map("recorded_by_id") @db.Uuid
+  journalEntryId String      @unique @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  recordedBy User @relation("TransferRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@map("treasury_transfers")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — returns
+// ---------------------------------------------------------------------------
+
+enum ReturnFeeStatus {
+  /// No return fee configured for the route: an administrator must set one or waive it.
+  RETURN_FEE_UNCONFIGURED
+  SET
+  WAIVED
+  POSTED
+}
+
+/// The return of a shipment to its merchant. Physical progress is the shipment status; this
+/// record holds the request, approval, return driver and the return fee decision.
+model ReturnRecord {
+  id               String          @id @default(uuid(7)) @db.Uuid
+  shipmentId       String          @unique @map("shipment_id") @db.Uuid
+  requestedById    String?         @map("requested_by_id") @db.Uuid
+  requestReason    String?         @map("request_reason")
+  requestedAt      DateTime        @default(now()) @map("requested_at")
+  approvedById     String?         @map("approved_by_id") @db.Uuid
+  approvedAt       DateTime?       @map("approved_at")
+  returnDriverId   String?         @map("return_driver_id") @db.Uuid
+  /// The delivery driver before the return was assigned (for the record).
+  originalDriverId String?         @map("original_driver_id") @db.Uuid
+  feeStatus        ReturnFeeStatus @map("fee_status")
+  feeAmount        Decimal?        @map("fee_amount") @db.Decimal(12, 2)
+  feeSetById       String?         @map("fee_set_by_id") @db.Uuid
+  feeSetAt         DateTime?       @map("fee_set_at")
+  feeReason        String?         @map("fee_reason")
+  journalEntryId   String?         @unique @map("journal_entry_id") @db.Uuid
+  completedAt      DateTime?       @map("completed_at")
+  closedAt         DateTime?       @map("closed_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  requestedBy  User?    @relation("ReturnRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy   User?    @relation("ReturnApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  returnDriver User?    @relation("ReturnDriver", fields: [returnDriverId], references: [id], onDelete: Restrict)
+  feeSetBy     User?    @relation("ReturnFeeSetter", fields: [feeSetById], references: [id], onDelete: Restrict)
+
+  @@index([feeStatus])
+  @@index([closedAt])
+  @@map("return_records")
 }

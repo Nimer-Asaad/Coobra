@@ -7,9 +7,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   adminCreateShipmentSchema,
-  GOVERNORATES,
   type AdminCreateShipmentInput,
   type MerchantOption,
+  type PricingQuote,
   type ShipmentDetails,
 } from '@coobra/shared';
 import { translateValidation } from '@coobra/i18n';
@@ -20,10 +20,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { NativeSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { ZoneSelect } from '@/components/zones/zone-select';
 import { bff } from '@/lib/api-client';
+import { formatMoney } from '@/lib/format';
 import { useFormErrors } from '@/lib/use-form-errors';
+import { zoneText } from '@/lib/zones';
 
 function useDebounced(value: string, delay = 250) {
   const [debounced, setDebounced] = useState(value);
@@ -35,7 +37,7 @@ function useDebounced(value: string, delay = 250) {
 }
 
 export function CreateShipmentForm() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const { fieldErrors, validate, applyApiError } = useFormErrors();
@@ -44,6 +46,23 @@ export function CreateShipmentForm() {
   const debouncedQuery = useDebounced(merchantQuery);
   const addAnother = useRef(false);
   const [lastCreated, setLastCreated] = useState<ShipmentDetails | null>(null);
+  const [route, setRoute] = useState({ originZoneId: '', destinationZoneId: '' });
+
+  // Live price preview; the server re-prices on creation anyway.
+  const preview = useQuery({
+    queryKey: ['admin', 'quote', merchant?.id, route.originZoneId, route.destinationZoneId],
+    queryFn: () =>
+      bff<PricingQuote>('/v1/admin/pricing/quote', {
+        method: 'POST',
+        body: {
+          merchantId: merchant?.id,
+          destinationZoneId: route.destinationZoneId,
+          originZoneId: route.originZoneId || undefined,
+        },
+      }),
+    enabled: Boolean(merchant && route.destinationZoneId),
+    retry: false,
+  });
 
   const merchants = useQuery({
     queryKey: ['admin', 'merchants', debouncedQuery],
@@ -59,6 +78,7 @@ export function CreateShipmentForm() {
       if (addAnother.current) {
         // Keep the merchant selected for fast consecutive entry.
         formRef.current?.reset();
+        setRoute({ originZoneId: '', destinationZoneId: '' });
         setLastCreated(shipment);
         formRef.current?.querySelector<HTMLInputElement>('[name="recipientName"]')?.focus();
       } else {
@@ -162,14 +182,16 @@ export function CreateShipmentForm() {
                 recipientName: get('recipientName'),
                 recipientPhone: get('recipientPhone'),
                 recipientPhoneAlt: get('recipientPhoneAlt'),
-                governorate: get('governorate'),
+                destinationZoneId: get('destinationZoneId'),
+                originZoneId: get('originZoneId') || undefined,
                 city: get('city'),
                 addressLine: get('addressLine'),
                 landmark: get('landmark'),
                 recipientNotes: get('recipientNotes'),
                 merchantNotes: get('merchantNotes'),
                 codAmount: get('codAmount'),
-                deliveryFee: get('deliveryFee'),
+                manualFee: get('manualFee'),
+                manualFeeReason: get('manualFeeReason'),
               });
               if (values) create.mutate(values);
             }}
@@ -196,27 +218,50 @@ export function CreateShipmentForm() {
               error={field('recipientPhoneAlt')}
             />
             <div className="flex flex-col gap-2">
-              <Label htmlFor="governorate">{t('shipments.fields.governorate')}</Label>
-              <NativeSelect
-                id="governorate"
-                name="governorate"
-                defaultValue=""
-                aria-invalid={Boolean(field('governorate'))}
-              >
-                <option value="" disabled>
-                  {t('shipments.fields.chooseGovernorate')}
-                </option>
-                {GOVERNORATES.map((code) => (
-                  <option key={code} value={code}>
-                    {t(`governorates.${code}`)}
-                  </option>
-                ))}
-              </NativeSelect>
-              {field('governorate') ? (
+              <Label htmlFor="destinationZoneId">{t('shipments.fields.destinationZone')}</Label>
+              <ZoneSelect
+                id="destinationZoneId"
+                name="destinationZoneId"
+                placeholder={t('zones.choose')}
+                aria-invalid={Boolean(field('destinationZoneId'))}
+                onChange={(event) =>
+                  setRoute((current) => ({ ...current, destinationZoneId: event.target.value }))
+                }
+              />
+              {field('destinationZoneId') ? (
                 <p className="text-sm text-destructive">
-                  {translateValidation(t, field('governorate'))}
+                  {translateValidation(t, field('destinationZoneId'))}
                 </p>
               ) : null}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="originZoneId">{t('shipments.fields.originZone')}</Label>
+              <ZoneSelect
+                id="originZoneId"
+                name="originZoneId"
+                placeholder={t('shipments.fields.originDefault')}
+                onChange={(event) =>
+                  setRoute((current) => ({ ...current, originZoneId: event.target.value }))
+                }
+              />
+            </div>
+            <div className="sm:col-span-2">
+              {!merchant || !route.destinationZoneId ? (
+                <p className="text-sm text-muted-foreground">{t('pricing.chooseDestination')}</p>
+              ) : preview.isFetching ? (
+                <p className="text-sm text-muted-foreground">{t('pricing.calculating')}</p>
+              ) : preview.data ? (
+                <Alert variant="success">
+                  {t('pricing.estimated')}:{' '}
+                  <strong>{formatMoney(preview.data.finalFee, i18n.language)}</strong> ·{' '}
+                  {t(`pricing.source.${preview.data.source}`)} ·{' '}
+                  {zoneText(preview.data.origin, i18n.language)}{' '}
+                  {i18n.language === 'ar' ? '←' : '→'}{' '}
+                  {zoneText(preview.data.destination, i18n.language)}
+                </Alert>
+              ) : (
+                <ErrorAlert error={preview.error} />
+              )}
             </div>
             <FormField name="city" label={t('shipments.fields.city')} error={field('city')} />
             <FormField
@@ -247,11 +292,17 @@ export function CreateShipmentForm() {
               error={field('codAmount')}
             />
             <FormField
-              name="deliveryFee"
+              name="manualFee"
               inputMode="decimal"
               dir="ltr"
-              label={t('shipments.fields.deliveryFee')}
-              error={field('deliveryFee')}
+              label={t('pricing.manualFee')}
+              hint={t('pricing.manualFeeHint')}
+              error={field('manualFee')}
+            />
+            <FormField
+              name="manualFeeReason"
+              label={t('pricing.manualFeeReason')}
+              error={field('manualFeeReason')}
             />
             <div className="flex flex-col gap-2 sm:col-span-2">
               <Label htmlFor="recipientNotes">{t('shipments.fields.recipientNotes')}</Label>

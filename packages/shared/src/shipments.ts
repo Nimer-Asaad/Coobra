@@ -14,6 +14,9 @@ export const SHIPMENT_STATUSES = [
   'DELIVERED',
   'DELIVERY_FAILED',
   'RETURN_REQUESTED',
+  'RETURN_APPROVED',
+  'RETURN_IN_TRANSIT',
+  'RETURNED_TO_HUB',
   'RETURNED',
   'CANCELLED',
 ] as const;
@@ -36,6 +39,8 @@ export const DRIVER_ACTIVE_STATUSES = [
   'PICKED_UP',
   'OUT_FOR_DELIVERY',
   'DELIVERY_FAILED',
+  'RETURN_APPROVED',
+  'RETURN_IN_TRANSIT',
 ] as const satisfies readonly ShipmentStatus[];
 
 export const CURRENCIES = ['ILS'] as const;
@@ -117,7 +122,14 @@ export const SHIPMENT_TRANSITIONS: readonly ShipmentTransitionRule[] = [
     requiresReason: true,
   },
   { from: 'PICKED_UP', to: 'RETURN_REQUESTED', actors: ['STAFF'], requiresReason: true },
+  // Returned at the office (merchant collects it) without a return trip.
   { from: 'RETURN_REQUESTED', to: 'RETURNED', actors: ['STAFF'] },
+  // Phase 3 return trip (RETURN_REQUESTED -> RETURN_APPROVED is the approve-return operation).
+  { from: 'RETURN_APPROVED', to: 'RETURN_IN_TRANSIT', actors: ['DRIVER'] },
+  { from: 'RETURN_APPROVED', to: 'RETURNED', actors: ['STAFF'] },
+  { from: 'RETURN_IN_TRANSIT', to: 'RETURNED_TO_HUB', actors: ['DRIVER', 'STAFF'] },
+  { from: 'RETURN_IN_TRANSIT', to: 'RETURNED', actors: ['DRIVER'] },
+  { from: 'RETURNED_TO_HUB', to: 'RETURNED', actors: ['STAFF'] },
   { from: 'CREATED', to: 'CANCELLED', actors: ['MERCHANT', 'STAFF'], requiresReason: true },
   { from: 'ASSIGNED', to: 'CANCELLED', actors: ['STAFF'], requiresReason: true },
 ];
@@ -218,12 +230,12 @@ function parseMoney(value: unknown, max: number, ctx: z.RefinementCtx): string {
 }
 
 /** A required amount (string or number in, normalised decimal string out). */
-function moneySchema(max: number) {
+export function moneySchema(max: number) {
   return z.unknown().transform((value, ctx) => parseMoney(value, max, ctx));
 }
 
 /** An optional amount: blank values become undefined. */
-function optionalMoneySchema(max: number) {
+export function optionalMoneySchema(max: number) {
   return z
     .unknown()
     .transform((value, ctx) =>
@@ -272,7 +284,10 @@ export const reasonSchema = z
   .min(3, { error: 'validation.reason.required' })
   .max(500, { error: 'validation.text.tooLong' });
 
-/** Fields a merchant fills in. Merchants never set the delivery fee or the owner. */
+/**
+ * Fields a merchant fills in. Merchants never set the delivery fee or the owner: the server
+ * prices the route (and, when given, checks the quote the merchant saw).
+ */
 export const createShipmentSchema = z.object({
   recipientName: z
     .string({ error: 'validation.required' })
@@ -281,8 +296,11 @@ export const createShipmentSchema = z.object({
     .max(120, { error: 'validation.name.tooLong' }),
   recipientPhone: shipmentPhoneSchema,
   recipientPhoneAlt: optionalPhone,
-  governorate: z.enum(GOVERNORATES, { error: 'validation.governorate.invalid' }),
-  city: text(80),
+  destinationZoneId: z.uuid({ error: 'validation.zone.required' }),
+  /** The quote shown to the merchant; rejected if expired, used or no longer accurate. */
+  quoteId: z.uuid({ error: 'validation.quote.invalid' }).optional(),
+  /** Optional locality detail; defaults to the destination zone name. */
+  city: optionalText(80),
   addressLine: text(300),
   landmark: optionalText(200),
   recipientNotes: optionalText(500),
@@ -291,11 +309,31 @@ export const createShipmentSchema = z.object({
 });
 export type CreateShipmentInput = z.infer<typeof createShipmentSchema>;
 
-/** Staff create shipments on behalf of an existing merchant and may set the delivery fee. */
-export const adminCreateShipmentSchema = createShipmentSchema.extend({
-  merchantId: z.uuid({ error: 'validation.merchant.required' }),
-  deliveryFee: optionalMoneySchema(MAX_DELIVERY_FEE),
-});
+/**
+ * Staff create shipments on behalf of an existing merchant. The fee is priced automatically; a
+ * manual fee is an override and needs a reason.
+ */
+export const adminCreateShipmentSchema = createShipmentSchema
+  .omit({ quoteId: true })
+  .extend({
+    merchantId: z.uuid({ error: 'validation.merchant.required' }),
+    /** Staff only; defaults to the merchant's approved pickup zone. */
+    originZoneId: z.uuid({ error: 'validation.zone.required' }).optional(),
+    manualFee: optionalMoneySchema(MAX_DELIVERY_FEE),
+    manualFeeReason: optionalText(500),
+  })
+  .superRefine((input, ctx) => {
+    if (
+      input.manualFee !== undefined &&
+      (!input.manualFeeReason || input.manualFeeReason.length < 3)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['manualFeeReason'],
+        message: 'validation.reason.required',
+      });
+    }
+  });
 export type AdminCreateShipmentInput = z.infer<typeof adminCreateShipmentSchema>;
 
 export const assignDriverSchema = z.object({
@@ -312,6 +350,11 @@ export const codConfirmationSchema = z.object({
   collected: z.boolean({ error: 'validation.cod.confirmRequired' }),
   amount: moneySchema(MAX_COD_AMOUNT),
   confirmed: z.literal(true, { error: 'validation.cod.confirmRequired' }),
+  /**
+   * Phase 3: when the recipient paid less than the COD, the driver explains why. The shipment
+   * is delivered with a PARTIAL COD status and a shortfall case is opened for review.
+   */
+  partialReason: optionalText(500),
 });
 export type CodConfirmationInput = z.infer<typeof codConfirmationSchema>;
 
@@ -351,3 +394,26 @@ export type ListShipmentsQuery = z.infer<typeof listShipmentsQuerySchema>;
 export const listPeopleQuerySchema = z.object({
   q: optionalQueryString.pipe(z.string().max(100).optional()),
 });
+
+// ---------------------------------------------------------------------------
+// Returns (Phase 3)
+// ---------------------------------------------------------------------------
+
+/** Approve a return; optionally send a return driver (otherwise collected at the office). */
+export const approveReturnSchema = z.object({
+  driverId: z.uuid({ error: 'validation.driver.required' }).optional(),
+  note: optionalText(500),
+});
+export type ApproveReturnInput = z.infer<typeof approveReturnSchema>;
+
+export const RETURN_FEE_STATUSES = ['RETURN_FEE_UNCONFIGURED', 'SET', 'WAIVED', 'POSTED'] as const;
+export type ReturnFeeStatus = (typeof RETURN_FEE_STATUSES)[number];
+
+export const setReturnFeeSchema = z.object({
+  amount: moneySchema(MAX_DELIVERY_FEE),
+  reason: reasonSchema,
+});
+export type SetReturnFeeInput = z.infer<typeof setReturnFeeSchema>;
+
+export const waiveReturnFeeSchema = z.object({ reason: reasonSchema });
+export type WaiveReturnFeeInput = z.infer<typeof waiveReturnFeeSchema>;

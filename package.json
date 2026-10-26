@@ -19,7 +19,8 @@
     "db:validate": "pnpm --filter @coobra/database db:validate",
     "db:migrate": "pnpm --filter @coobra/database db:migrate",
     "db:deploy": "pnpm --filter @coobra/database db:deploy",
-    "admin:create-super-admin": "pnpm --filter @coobra/api create-super-admin"
+    "admin:create-super-admin": "pnpm --filter @coobra/api create-super-admin",
+    "finance:backfill-phase2": "pnpm --filter @coobra/api finance:backfill-phase2"
   },
   "devDependencies": {
     "prettier": "3.6.2",

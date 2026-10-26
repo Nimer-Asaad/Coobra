@@ -6,7 +6,10 @@ Bilingual (Arabic / English) delivery management platform.
 **Phase 2:** shipments — creation by merchants and by operations staff on a merchant's behalf,
 controlled lifecycle with status history, driver assignment, delivery with cash-on-delivery
 confirmation, admin/merchant/driver screens. See [docs/shipments.md](docs/shipments.md).
-Settlements and accounting are not implemented yet.
+**Phase 3:** zones and hybrid route pricing (merchant-specific rules, quotes, audited overrides),
+a double-entry ledger for cash on delivery, driver cash settlements, merchant payouts with
+separation of duties, returns with configurable return fees, and financial reports. See
+[docs/adr/0001-phase3-pricing-finance.md](docs/adr/0001-phase3-pricing-finance.md).
 
 ## Applications and packages
 
@@ -87,11 +90,13 @@ pnpm build
 pnpm export:web           # Expo web export of both mobile apps
 pnpm db:validate
 pnpm format:check
+pnpm finance:backfill-phase2   # dry run of the Phase 2 ledger backfill (writes nothing)
 ```
 
 ## Documentation
 
 - [Architecture and authentication](docs/architecture.md)
 - [Shipments: roles, lifecycle, COD and API (Phase 2)](docs/shipments.md)
+- [ADR 0001: pricing, ledger, settlements, payouts and returns (Phase 3)](docs/adr/0001-phase3-pricing-finance.md)
 - [Impersonation design (not implemented)](docs/impersonation.md)
 - [Git workflow and establishing `main`](docs/git-workflow.md)

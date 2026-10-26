@@ -1,4 +1,4 @@
-import type { Language } from '@coobra/shared';
+import type { Language, ZoneLabel } from '@coobra/shared';
 
 /** Arabic text with Latin digits so amounts, phones and tracking numbers stay easy to read. */
 function intlLocale(language: Language): string {
@@ -26,4 +26,9 @@ export function formatDateTime(value: string, language: Language): string {
   } catch {
     return value.slice(0, 16).replace('T', ' ');
   }
+}
+
+export function zoneText(zone: ZoneLabel | null | undefined, language: Language): string | null {
+  if (!zone) return null;
+  return language === 'ar' ? zone.pathAr : zone.pathEn;
 }

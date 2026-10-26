@@ -1,4 +1,9 @@
-import { AUTH_TRANSPORT_HEADER, isApiErrorBody, type ApiErrorBody } from '@coobra/shared';
+import {
+  AUTH_TRANSPORT_HEADER,
+  IDEMPOTENCY_HEADER,
+  isApiErrorBody,
+  type ApiErrorBody,
+} from '@coobra/shared';
 import { usesCookieSessions } from './storage';
 
 export class ApiError extends Error {
@@ -10,8 +15,20 @@ export class ApiError extends Error {
 /** Thrown when the server cannot be reached (offline, wrong API URL, CORS). */
 export class NetworkError extends Error {}
 
+export interface RequestOptions {
+  method?: string;
+  body?: unknown;
+  /** Required by money-moving endpoints; reuse the same key when retrying the same action. */
+  idempotencyKey?: string;
+}
+
 export interface ApiClient {
-  request<T>(path: string, options?: { method?: string; body?: unknown }): Promise<T>;
+  request<T>(path: string, options?: RequestOptions): Promise<T>;
+}
+
+/** A key unique enough for replay protection (not a secret). */
+export function newIdempotencyKey(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 export function createApiClient(options: {
@@ -20,11 +37,9 @@ export function createApiClient(options: {
   onUnauthenticated: () => void;
 }): ApiClient {
   return {
-    async request<T>(
-      path: string,
-      { method = 'GET', body }: { method?: string; body?: unknown } = {},
-    ) {
+    async request<T>(path: string, { method = 'GET', body, idempotencyKey }: RequestOptions = {}) {
       const headers: Record<string, string> = { accept: 'application/json' };
+      if (idempotencyKey) headers[IDEMPOTENCY_HEADER] = idempotencyKey;
       if (body !== undefined) headers['content-type'] = 'application/json';
       if (usesCookieSessions) {
         headers[AUTH_TRANSPORT_HEADER] = 'cookie';

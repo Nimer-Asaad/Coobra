@@ -1,5 +1,7 @@
 import type { Language } from './language.js';
-import type { Currency, Governorate, ShipmentStatus } from './shipments.js';
+import type { CodStatus, ShipmentCodInfo } from './finance.js';
+import type { ShipmentPricingInfo, ZoneLabel } from './pricing.js';
+import type { Currency, ReturnFeeStatus, ShipmentStatus } from './shipments.js';
 import type { ClientApp, UserRole } from './roles.js';
 
 export type UserStatus = 'ACTIVE' | 'DISABLED';
@@ -14,7 +16,7 @@ export interface AuthUser {
   status: UserStatus;
   emailVerified: boolean;
   language: Language;
-  merchant: { businessName: string } | null;
+  merchant: { businessName: string; pickupZoneId: string | null } | null;
 }
 
 export interface SessionInfo {
@@ -90,13 +92,17 @@ export interface ShipmentListItem {
   status: ShipmentStatus;
   recipientName: string;
   recipientPhone: string;
-  governorate: Governorate;
+  /** Root zone code (Phase 2 governorate code for older shipments). */
+  governorate: string;
   city: string;
+  /** Destination zone with its full path; null for shipments created before Phase 3 zones. */
+  destination: ZoneLabel | null;
   codAmount: string;
   deliveryFee: string | null;
   currency: Currency;
   merchant: ShipmentMerchant;
   driver: ShipmentPerson | null;
+  codStatus: CodStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -137,6 +143,13 @@ export interface ShipmentDetails extends ShipmentListItem {
   pickedUpAt: string | null;
   deliveredAt: string | null;
   cod: CodCollectionRecord | null;
+  origin: ZoneLabel | null;
+  /** How the delivery fee was priced; null for Phase 2 shipments priced manually or not at all. */
+  pricing: ShipmentPricingInfo | null;
+  /** COD progress: collections, outstanding balance and shortfall case. */
+  codInfo: ShipmentCodInfo;
+  /** Return request, approval, return driver and fee decision (null if never requested). */
+  returnInfo: ShipmentReturnInfo | null;
   history: ShipmentHistoryEntry[];
   /** Concurrency token; changes on every update. */
   version: number;
@@ -153,6 +166,7 @@ export interface MerchantOption {
   id: string;
   fullName: string;
   businessName: string;
+  pickupZoneId: string | null;
   phone: string | null;
   email: string;
 }
@@ -162,4 +176,24 @@ export interface DriverOption {
   fullName: string;
   phone: string | null;
   activeShipments: number;
+}
+
+export interface ShipmentReturnInfo {
+  id: string;
+  requestedAt: string;
+  requestedBy: { id: string; fullName: string } | null;
+  requestReason: string | null;
+  approvedAt: string | null;
+  approvedBy: { id: string; fullName: string } | null;
+  returnDriver: ShipmentPerson | null;
+  feeStatus: ReturnFeeStatus;
+  feeAmount: string | null;
+  feeReason: string | null;
+  completedAt: string | null;
+  closedAt: string | null;
+}
+
+export interface ReturnListItem extends ShipmentReturnInfo {
+  shipment: { id: string; trackingNumber: string; status: ShipmentStatus; recipientName: string };
+  merchant: { id: string; businessName: string };
 }
