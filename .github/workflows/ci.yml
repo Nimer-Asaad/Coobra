@@ -1,0 +1,98 @@
+# Continuous integration for the COOBRA monorepo.
+# Runs every check against a throwaway PostgreSQL service container that exists only for the
+# duration of the job. No secrets, production credentials or real databases are used.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        # Same major version as docker-compose.yml.
+        image: postgres:16-alpine
+        env:
+          # Test-only credentials for a disposable container; not a secret.
+          POSTGRES_USER: coobra_ci
+          POSTGRES_PASSWORD: coobra_ci_only
+          POSTGRES_DB: coobra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U coobra_ci -d coobra_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Integration tests wipe this database; it only exists inside the service container.
+      TEST_DATABASE_URL: postgresql://coobra_ci:coobra_ci_only@localhost:5432/coobra_test?schema=public
+      # Placeholder for the Expo web export (the build is not deployed anywhere).
+      EXPO_PUBLIC_API_URL: http://localhost:4000
+      TURBO_TELEMETRY_DISABLED: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+      EXPO_NO_TELEMETRY: '1'
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # Version comes from "packageManager" in package.json.
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Validate Prisma schema
+        run: pnpm db:validate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Apply migrations to the CI database
+        working-directory: packages/database
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: |
+          pnpm exec prisma migrate deploy
+          # The migrated database must match schema.prisma exactly.
+          pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+
+      - name: Integration tests (PostgreSQL)
+        run: pnpm test:integration
+
+      - name: Production builds
+        run: pnpm build
+
+      - name: Export mobile web builds
+        run: pnpm export:web
