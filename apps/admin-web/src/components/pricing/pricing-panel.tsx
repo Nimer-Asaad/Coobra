@@ -10,6 +10,7 @@ import {
   type AdminQuoteRequestInput,
   type CreatePricingRuleInput,
   type MerchantOption,
+  type PickupZoneRequestItem,
   type PricingQuote,
   type PricingRuleItem,
   type RevisePricingRuleInput,
@@ -17,16 +18,17 @@ import {
 import { translateValidation } from '@coobra/i18n';
 import { ErrorAlert } from '@/components/error-alert';
 import { FormField } from '@/components/form-field';
-import { ZoneSelect } from '@/components/zones/zone-select';
+import { useAdminZones, ZoneSelect } from '@/components/zones/zone-select';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/select';
 import { bff } from '@/lib/api-client';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import { useFormErrors } from '@/lib/use-form-errors';
-import { zoneText } from '@/lib/zones';
+import { zoneOptions, zoneText } from '@/lib/zones';
 
 const RULES_KEY = ['admin', 'pricing-rules'];
 
@@ -87,6 +89,7 @@ export function PricingPanel({
         <div className="order-1 flex flex-col gap-6 lg:order-2">
           {canManageRules ? <CreateRuleForm /> : null}
           <QuoteCalculator />
+          {canSetPickup ? <PickupZoneRequests /> : null}
           {canSetPickup ? <PickupZoneForm /> : null}
         </div>
       </div>
@@ -462,6 +465,97 @@ function PickupZoneForm() {
             {t('common.save')}
           </Button>
         </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+const PICKUP_REQUESTS_KEY = ['admin', 'pickup-zone-requests'];
+
+/** Merchant requests to change their pickup area; prices only move once one is approved here. */
+function PickupZoneRequests() {
+  const { t, i18n } = useTranslation();
+  const queryClient = useQueryClient();
+  const zones = useAdminZones();
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const requests = useQuery({
+    queryKey: PICKUP_REQUESTS_KEY,
+    queryFn: () => bff<PickupZoneRequestItem[]>('/v1/admin/pickup-zone-requests'),
+  });
+  const decide = useMutation({
+    mutationFn: ({ id, approve }: { id: string; approve: boolean }) => {
+      const note = notes[id]?.trim();
+      return bff<PickupZoneRequestItem>(
+        `/v1/admin/pickup-zone-requests/${id}/${approve ? 'approve' : 'reject'}`,
+        { method: 'POST', body: note ? { note } : {} },
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PICKUP_REQUESTS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'merchants'] });
+    },
+  });
+  const paths = new Map(
+    zoneOptions(zones.data ?? [], i18n.language).map((option) => [option.id, option.path]),
+  );
+  const pathOf = (id: string | null) => (id ? (paths.get(id) ?? id) : t('pricing.pickupNone'));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('pricing.pickupRequestsTitle')}</CardTitle>
+        <CardDescription>{t('pricing.pickupHint')}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {requests.isPending ? (
+          <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+        ) : requests.isError ? (
+          <ErrorAlert error={requests.error} />
+        ) : requests.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('pricing.pickupRequestsEmpty')}</p>
+        ) : (
+          <ul className="divide-y">
+            {requests.data.map((item) => (
+              <li key={item.id} className="flex flex-col gap-2 py-3">
+                <p className="font-medium">{item.merchant.businessName}</p>
+                <p className="text-sm">
+                  {t('pricing.pickupFrom')}: {pathOf(item.previousZoneId)}
+                  <br />
+                  {t('pricing.pickupTo')}: <strong>{pathOf(item.requestedZoneId)}</strong>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatDateTime(item.createdAt, i18n.language)}
+                </p>
+                <Input
+                  value={notes[item.id] ?? ''}
+                  onChange={(event) =>
+                    setNotes((current) => ({ ...current, [item.id]: event.target.value }))
+                  }
+                  placeholder={t('pricing.pickupDecisionNote')}
+                  aria-label={t('pricing.pickupDecisionNote')}
+                  maxLength={500}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    disabled={decide.isPending}
+                    onClick={() => decide.mutate({ id: item.id, approve: true })}
+                  >
+                    {t('pricing.pickupApprove')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={decide.isPending}
+                    onClick={() => decide.mutate({ id: item.id, approve: false })}
+                  >
+                    {t('pricing.pickupReject')}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ErrorAlert error={decide.error} />
       </CardContent>
     </Card>
   );

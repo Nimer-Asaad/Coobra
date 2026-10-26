@@ -223,7 +223,8 @@ export class ShipmentsService {
   private async create(
     creator: Actor,
     merchantId: string,
-    input: Omit<CreateShipmentInput, 'quoteId'> & { quoteId?: string },
+    // originZoneId comes only from staff; merchant input never carries it (schema strips it).
+    input: Omit<CreateShipmentInput, 'quoteId'> & { quoteId?: string; originZoneId?: string },
     meta: RequestMeta,
     priceShipment: (
       tx: Tx,

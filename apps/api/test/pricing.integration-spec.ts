@@ -57,10 +57,12 @@ describe('Zones and pricing (PostgreSQL integration)', () => {
     ramallah = await zoneId(ctx.prisma, 'RAMALLAH_ALBIREH');
     nablus = await zoneId(ctx.prisma, 'NABLUS');
     gaza = await zoneId(ctx.prisma, 'GAZA');
-    await api(merchantA).put('/v1/merchant/pickup-zone', { zoneId: ramallah }).expect(204);
-    await api(ops)
-      .put(`/v1/admin/merchants/${merchantB.id}/pickup-zone`, { zoneId: ramallah })
-      .expect(204);
+    // Staff set pickup zones; merchants can only request a change (pickup-zones spec).
+    for (const merchant of [merchantA, merchantB]) {
+      await api(ops)
+        .put(`/v1/admin/merchants/${merchant.id}/pickup-zone`, { zoneId: ramallah })
+        .expect(204);
+    }
   });
 
   afterAll(async () => {

@@ -120,7 +120,7 @@ export class PricingService {
     };
   }
 
-  /** The merchant's pickup zone unless an origin is given. */
+  /** The merchant's approved pickup zone unless staff give an origin. */
   async resolveOrigin(db: Db, merchantId: string, originZoneId: string | undefined) {
     if (originZoneId) return originZoneId;
     const profile = await db.merchantProfile.findUnique({ where: { userId: merchantId } });
@@ -160,10 +160,11 @@ export class PricingService {
   /** Merchant quote: persisted, single-use and valid for QUOTE_TTL_MINUTES. */
   async quoteForMerchant(
     merchant: Actor,
-    input: { originZoneId?: string; destinationZoneId: string },
+    input: { destinationZoneId: string },
   ): Promise<PricingQuote> {
     const db = this.prisma.client;
-    const originZoneId = await this.resolveOrigin(db, merchant.id, input.originZoneId);
+    // Always the approved pickup zone: a merchant cannot choose the origin of their price.
+    const originZoneId = await this.resolveOrigin(db, merchant.id, undefined);
     const result = await this.price(db, {
       merchantId: merchant.id,
       originZoneId,

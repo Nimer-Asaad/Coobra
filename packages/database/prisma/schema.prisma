@@ -109,6 +109,8 @@ model User {
   approvedReturns      ReturnRecord[]          @relation("ReturnApprover")
   returnTasks          ReturnRecord[]          @relation("ReturnDriver")
   returnFeeDecisions   ReturnRecord[]          @relation("ReturnFeeSetter")
+  pickupZoneRequests   PickupZoneRequest[]     @relation("PickupRequestMerchant")
+  pickupZoneDecisions  PickupZoneRequest[]     @relation("PickupRequestDecider")
 
   @@index([role])
   @@map("users")
@@ -370,11 +372,13 @@ model Zone {
   parent   Zone?    @relation("ZoneTree", fields: [parentId], references: [id], onDelete: Restrict)
   children Zone[]   @relation("ZoneTree")
 
-  merchantPickups      MerchantProfile[] @relation("MerchantPickupZone")
-  originShipments      Shipment[]        @relation("ShipmentOriginZone")
-  destinationShipments Shipment[]        @relation("ShipmentDestinationZone")
-  originRules          PricingRule[]     @relation("PricingRuleOrigin")
-  destinationRules     PricingRule[]     @relation("PricingRuleDestination")
+  merchantPickups      MerchantProfile[]   @relation("MerchantPickupZone")
+  originShipments      Shipment[]          @relation("ShipmentOriginZone")
+  destinationShipments Shipment[]          @relation("ShipmentDestinationZone")
+  originRules          PricingRule[]       @relation("PricingRuleOrigin")
+  destinationRules     PricingRule[]       @relation("PricingRuleDestination")
+  requestedPickups     PickupZoneRequest[] @relation("PickupRequestZone")
+  previousPickups      PickupZoneRequest[] @relation("PickupRequestPreviousZone")
 
   @@index([parentId])
   @@map("zones")
@@ -425,6 +429,39 @@ model PricingRule {
   @@index([active, merchantId])
   @@index([originZoneId, destinationZoneId])
   @@map("pricing_rules")
+}
+
+enum PickupZoneRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+/// A merchant's request to change their pickup zone. Prices use the approved zone on the
+/// merchant profile; a request only takes effect when staff approve it. At most one PENDING
+/// request per merchant (partial unique index in migration 20261026100000_pickup_zone_requests).
+model PickupZoneRequest {
+  id              String                  @id @default(uuid(7)) @db.Uuid
+  merchantId      String                  @map("merchant_id") @db.Uuid
+  requestedZoneId String                  @map("requested_zone_id") @db.Uuid
+  /// The approved zone when the request was made.
+  previousZoneId  String?                 @map("previous_zone_id") @db.Uuid
+  status          PickupZoneRequestStatus @default(PENDING)
+  /// Staff who approved or rejected; null while pending or when the merchant withdrew.
+  decidedById     String?                 @map("decided_by_id") @db.Uuid
+  decidedAt       DateTime?               @map("decided_at")
+  decisionNote    String?                 @map("decision_note")
+  createdAt       DateTime                @default(now()) @map("created_at")
+
+  merchant      User  @relation("PickupRequestMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  requestedZone Zone  @relation("PickupRequestZone", fields: [requestedZoneId], references: [id], onDelete: Restrict)
+  previousZone  Zone? @relation("PickupRequestPreviousZone", fields: [previousZoneId], references: [id], onDelete: Restrict)
+  decidedBy     User? @relation("PickupRequestDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([merchantId, createdAt])
+  @@map("pickup_zone_requests")
 }
 
 /// A single-use price quote shown to a merchant, valid until `expiresAt`.
@@ -583,6 +620,9 @@ enum JournalKind {
 }
 
 /// Immutable, balanced journal entry (enforced by database triggers).
+/// Two partial unique indexes (migration 20261026090000_journal_source_guards, not expressible
+/// here) allow one posting per COD collection and one per shipment delivery fee across the live
+/// path and the Phase 2 backfill.
 model JournalEntry {
   id           String      @id @default(uuid(7)) @db.Uuid
   kind         JournalKind

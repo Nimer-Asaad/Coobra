@@ -297,8 +297,6 @@ export const createShipmentSchema = z.object({
   recipientPhone: shipmentPhoneSchema,
   recipientPhoneAlt: optionalPhone,
   destinationZoneId: z.uuid({ error: 'validation.zone.required' }),
-  /** Defaults to the merchant's pickup zone. */
-  originZoneId: z.uuid({ error: 'validation.zone.required' }).optional(),
   /** The quote shown to the merchant; rejected if expired, used or no longer accurate. */
   quoteId: z.uuid({ error: 'validation.quote.invalid' }).optional(),
   /** Optional locality detail; defaults to the destination zone name. */
@@ -319,6 +317,8 @@ export const adminCreateShipmentSchema = createShipmentSchema
   .omit({ quoteId: true })
   .extend({
     merchantId: z.uuid({ error: 'validation.merchant.required' }),
+    /** Staff only; defaults to the merchant's approved pickup zone. */
+    originZoneId: z.uuid({ error: 'validation.zone.required' }).optional(),
     manualFee: optionalMoneySchema(MAX_DELIVERY_FEE),
     manualFeeReason: optionalText(500),
   })

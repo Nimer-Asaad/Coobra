@@ -2,7 +2,12 @@ import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
 import { SUPPORTED_LANGUAGES, zoneOptions } from '@coobra/shared';
 import { useMobileConfig } from '../config';
-import { useSetPickupZone, useZones } from '../shipments/api';
+import {
+  usePickupZone,
+  useRequestPickupZone,
+  useWithdrawPickupZone,
+  useZones,
+} from '../shipments/api';
 import { ChoiceField } from '../shipments/components';
 import { useChangeLanguage, useLogout } from '../hooks';
 import { useLanguageStore } from '../state/language-store';
@@ -58,30 +63,66 @@ const styles = StyleSheet.create({
   section: { gap: spacing.sm },
 });
 
-/** The merchant's pickup area: delivery prices are calculated from it. */
+/**
+ * The merchant's pickup area: delivery prices are calculated from the approved one. A change is
+ * a request that COOBRA staff approve; until then the approved area keeps pricing shipments.
+ */
 function PickupZoneSetting() {
   const { t } = useTranslation();
   const language = useLanguageStore((state) => state.language) ?? 'en';
-  const pickupZoneId = useSessionStore((state) => state.user?.merchant?.pickupZoneId ?? '');
   const zones = useZones();
-  const setPickup = useSetPickupZone();
-  const options = zoneOptions(zones.data ?? [], language)
-    .filter((option) => option.active)
-    .map((option) => ({ value: option.id, label: option.path }));
+  const pickup = usePickupZone();
+  const request = useRequestPickupZone();
+  const withdraw = useWithdrawPickupZone();
+  const options = zoneOptions(zones.data ?? [], language);
+  const pathOf = (id: string | null | undefined) =>
+    options.find((option) => option.id === id)?.path ?? t('pricing.pickupNone');
+  const state = pickup.data;
+  const rejected =
+    state && !state.pending && state.lastDecision?.status === 'REJECTED'
+      ? state.lastDecision
+      : null;
   return (
     <View style={styles.section}>
+      <AppText variant="subtitle">{t('pricing.pickupApproved')}</AppText>
+      <AppText testID="settings-pickup-approved">{pathOf(state?.approvedZoneId)}</AppText>
+      <AppText variant="muted">{t('pricing.pickupHint')}</AppText>
+      {state?.pending ? (
+        <>
+          <Banner
+            tone="info"
+            message={t('pricing.pickupPending', { zone: pathOf(state.pending.requestedZoneId) })}
+          />
+          <AppButton
+            variant="link"
+            title={t('pricing.pickupWithdraw')}
+            loading={withdraw.isPending}
+            onPress={() => withdraw.mutate()}
+          />
+        </>
+      ) : null}
+      {rejected ? (
+        <Banner
+          message={`${t('pricing.pickupRejected', { zone: pathOf(rejected.requestedZoneId) })}${
+            rejected.decisionNote ? ` ${rejected.decisionNote}` : ''
+          }`}
+        />
+      ) : null}
       <ChoiceField
-        label={t('pricing.pickupTitle')}
-        placeholder={t('pricing.pickupMissing')}
+        label={t('pricing.pickupRequestChange')}
+        placeholder={t('zones.choose')}
         searchPlaceholder={t('zones.search')}
-        options={options}
-        value={pickupZoneId}
-        onChange={(zoneId) => setPickup.mutate(zoneId)}
+        options={options
+          .filter((option) => option.active)
+          .map((option) => ({ value: option.id, label: option.path }))}
+        value={state?.pending?.requestedZoneId ?? ''}
+        onChange={(zoneId) => request.mutate(zoneId)}
         testID="settings-pickup-zone"
       />
-      <AppText variant="muted">{t('pricing.pickupHint')}</AppText>
-      {setPickup.isSuccess ? <Banner tone="success" message={t('pricing.pickupSaved')} /> : null}
-      <ErrorBanner error={setPickup.error} />
+      {request.isSuccess && state?.pending ? (
+        <Banner tone="success" message={t('pricing.pickupRequested')} />
+      ) : null}
+      <ErrorBanner error={request.error ?? withdraw.error ?? pickup.error} />
     </View>
   );
 }

@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CreateShipmentInput,
-  MeResponse,
+  MerchantPickupZoneState,
   Paginated,
   PricingQuote,
   ShipmentDetails,
@@ -108,18 +108,55 @@ export function useZones() {
 export function useQuote() {
   const api = useApi();
   return useMutation({
-    mutationFn: (input: { destinationZoneId: string; originZoneId?: string }) =>
+    // Priced from the merchant's approved pickup zone; the origin is never chosen here.
+    mutationFn: (input: { destinationZoneId: string }) =>
       api.request<PricingQuote>('/v1/merchant/pricing/quote', { method: 'POST', body: input }),
   });
 }
 
-export function useSetPickupZone() {
+const PICKUP_ZONE_KEY = ['merchant', 'pickup-zone'];
+
+/** Keeps the signed-in merchant's approved zone in the session in step with the server. */
+function syncApprovedZone(state: MerchantPickupZoneState) {
+  const { user, setUser } = useSessionStore.getState();
+  if (user?.merchant && user.merchant.pickupZoneId !== state.approvedZoneId) {
+    setUser({ ...user, merchant: { ...user.merchant, pickupZoneId: state.approvedZoneId } });
+  }
+  return state;
+}
+
+/** The approved pickup zone (prices use it) and any change waiting for staff approval. */
+export function usePickupZone() {
   const api = useApi();
+  return useQuery({
+    queryKey: PICKUP_ZONE_KEY,
+    queryFn: async () =>
+      syncApprovedZone(await api.request<MerchantPickupZoneState>('/v1/merchant/pickup-zone')),
+  });
+}
+
+/** Asks for a new pickup zone; it only takes effect once staff approve it. */
+export function useRequestPickupZone() {
+  const api = useApi();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (zoneId: string) => {
-      await api.request<void>('/v1/merchant/pickup-zone', { method: 'PUT', body: { zoneId } });
-      const { user } = await api.request<MeResponse>('/v1/auth/me');
-      useSessionStore.getState().setUser(user);
-    },
+    mutationFn: (zoneId: string) =>
+      api.request<MerchantPickupZoneState>('/v1/merchant/pickup-zone', {
+        method: 'PUT',
+        body: { zoneId },
+      }),
+    onSuccess: (state) => queryClient.setQueryData(PICKUP_ZONE_KEY, syncApprovedZone(state)),
+  });
+}
+
+export function useWithdrawPickupZone() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.request<MerchantPickupZoneState>('/v1/merchant/pickup-zone/request', {
+        method: 'DELETE',
+      }),
+    onSuccess: (state) => queryClient.setQueryData(PICKUP_ZONE_KEY, syncApprovedZone(state)),
   });
 }

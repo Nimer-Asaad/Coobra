@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import {
@@ -8,6 +19,7 @@ import {
   createZoneSchema,
   FEE_OVERRIDE_ROLES,
   feeOverrideSchema,
+  pickupZoneDecisionSchema,
   pickupZoneSchema,
   PRICING_MANAGER_ROLES,
   quoteRequestSchema,
@@ -22,7 +34,10 @@ import {
   type CreateZoneInput,
   type CreateZoneKindInput,
   type FeeOverrideInput,
+  type MerchantPickupZoneState,
+  type PickupZoneDecisionInput,
   type PickupZoneInput,
+  type PickupZoneRequestItem,
   type PricingQuote,
   type PricingRuleItem,
   type QuoteRequestInput,
@@ -35,6 +50,7 @@ import {
 import { Auth, Meta, Roles } from '../common/decorators.js';
 import type { RequestAuth, RequestMeta } from '../common/request.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { PickupZonesService } from './pickup-zones.service.js';
 import { PricingService } from './pricing.service.js';
 import { ZonesService } from './zones.service.js';
 
@@ -62,6 +78,7 @@ export class AdminPricingController {
   constructor(
     private readonly zones: ZonesService,
     private readonly pricing: PricingService,
+    private readonly pickupZones: PickupZonesService,
   ) {}
 
   @Get('zone-kinds')
@@ -180,6 +197,36 @@ export class AdminPricingController {
     return this.pricing.setPickupZone(auth.user, id, body.zoneId, meta);
   }
 
+  @Roles(...SHIPMENT_MANAGER_ROLES)
+  @Get('pickup-zone-requests')
+  pickupZoneRequests(): Promise<PickupZoneRequestItem[]> {
+    return this.pickupZones.pending();
+  }
+
+  @Roles(...SHIPMENT_MANAGER_ROLES)
+  @HttpCode(200)
+  @Post('pickup-zone-requests/:id/approve')
+  approvePickupZone(
+    @Auth() auth: RequestAuth,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(pickupZoneDecisionSchema)) body: PickupZoneDecisionInput,
+    @Meta() meta: RequestMeta,
+  ): Promise<PickupZoneRequestItem> {
+    return this.pickupZones.decide(auth.user, id, true, body.note, meta);
+  }
+
+  @Roles(...SHIPMENT_MANAGER_ROLES)
+  @HttpCode(200)
+  @Post('pickup-zone-requests/:id/reject')
+  rejectPickupZone(
+    @Auth() auth: RequestAuth,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(pickupZoneDecisionSchema)) body: PickupZoneDecisionInput,
+    @Meta() meta: RequestMeta,
+  ): Promise<PickupZoneRequestItem> {
+    return this.pickupZones.decide(auth.user, id, false, body.note, meta);
+  }
+
   @Roles(...FEE_OVERRIDE_ROLES)
   @HttpCode(204)
   @Post('shipments/:id/fee-override')
@@ -193,11 +240,14 @@ export class AdminPricingController {
   }
 }
 
-/** Merchant app: quotes and the merchant's own pickup zone. */
+/** Merchant app: quotes and requests to change the merchant's own pickup zone. */
 @Controller('merchant')
 @Roles('MERCHANT')
 export class MerchantPricingController {
-  constructor(private readonly pricing: PricingService) {}
+  constructor(
+    private readonly pricing: PricingService,
+    private readonly pickupZones: PickupZonesService,
+  ) {}
 
   @Throttle({ default: { limit: 60, ttl: MINUTE } })
   @HttpCode(200)
@@ -209,13 +259,28 @@ export class MerchantPricingController {
     return this.pricing.quoteForMerchant(auth.user, body);
   }
 
-  @HttpCode(204)
+  @Get('pickup-zone')
+  pickupZone(@Auth() auth: RequestAuth): Promise<MerchantPickupZoneState> {
+    return this.pickupZones.stateFor(auth.user.id);
+  }
+
+  /** Requests a change; the approved zone keeps pricing shipments until staff approve. */
+  @HttpCode(202)
   @Put('pickup-zone')
-  setPickupZone(
+  requestPickupZone(
     @Auth() auth: RequestAuth,
     @Body(new ZodValidationPipe(pickupZoneSchema)) body: PickupZoneInput,
     @Meta() meta: RequestMeta,
-  ): Promise<void> {
-    return this.pricing.setPickupZone(auth.user, auth.user.id, body.zoneId, meta);
+  ): Promise<MerchantPickupZoneState> {
+    return this.pickupZones.request(auth.user, body.zoneId, meta);
+  }
+
+  @HttpCode(200)
+  @Delete('pickup-zone/request')
+  withdrawPickupZone(
+    @Auth() auth: RequestAuth,
+    @Meta() meta: RequestMeta,
+  ): Promise<MerchantPickupZoneState> {
+    return this.pickupZones.withdraw(auth.user, meta);
   }
 }

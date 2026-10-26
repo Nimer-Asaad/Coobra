@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminQuoteRequestSchema,
   createPricingRuleSchema,
   createZoneSchema,
   feeOverrideSchema,
+  quoteRequestSchema,
   revisePricingRuleSchema,
 } from './pricing.js';
+import { adminCreateShipmentSchema, createShipmentSchema } from './shipments.js';
 import { toFieldErrors } from './validation.js';
 
 const zoneA = '0199a1c2-7d3e-7f00-8000-0000000000a1';
@@ -78,5 +81,30 @@ describe('zones and overrides', () => {
     if (!result.success) {
       expect(toFieldErrors(result.error)).toEqual({ reason: 'validation.reason.required' });
     }
+  });
+
+  it('lets only staff choose the pricing origin', () => {
+    expect(quoteRequestSchema.parse({ destinationZoneId: zoneB, originZoneId: zoneA })).toEqual({
+      destinationZoneId: zoneB,
+    });
+    const shipment = {
+      recipientName: 'Recipient',
+      recipientPhone: '0599123456',
+      destinationZoneId: zoneB,
+      originZoneId: zoneA,
+      addressLine: 'Street 1',
+      codAmount: '0',
+    };
+    expect(createShipmentSchema.parse(shipment)).not.toHaveProperty('originZoneId');
+    expect(adminCreateShipmentSchema.parse({ ...shipment, merchantId: zoneA }).originZoneId).toBe(
+      zoneA,
+    );
+    expect(
+      adminQuoteRequestSchema.parse({
+        merchantId: zoneA,
+        originZoneId: zoneA,
+        destinationZoneId: zoneB,
+      }).originZoneId,
+    ).toBe(zoneA);
   });
 });

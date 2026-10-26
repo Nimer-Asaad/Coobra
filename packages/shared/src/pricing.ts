@@ -140,14 +140,16 @@ export const revisePricingRuleSchema = z.object({
 });
 export type RevisePricingRuleInput = z.infer<typeof revisePricingRuleSchema>;
 
+/** A merchant quote is always priced from the merchant's approved pickup zone. */
 export const quoteRequestSchema = z.object({
-  originZoneId: z.uuid({ error: 'validation.zone.required' }).optional(),
   destinationZoneId: z.uuid({ error: 'validation.zone.required' }),
 });
 export type QuoteRequestInput = z.infer<typeof quoteRequestSchema>;
 
+/** Staff may price from another origin; it defaults to the merchant's approved pickup zone. */
 export const adminQuoteRequestSchema = quoteRequestSchema.extend({
   merchantId: z.uuid({ error: 'validation.merchant.required' }),
+  originZoneId: z.uuid({ error: 'validation.zone.required' }).optional(),
 });
 export type AdminQuoteRequestInput = z.infer<typeof adminQuoteRequestSchema>;
 
@@ -167,6 +169,43 @@ export const pickupZoneSchema = z.object({
   zoneId: z.uuid({ error: 'validation.zone.required' }),
 });
 export type PickupZoneInput = z.infer<typeof pickupZoneSchema>;
+
+/*
+ * Merchant pickup-zone changes. The approved zone prices every merchant shipment; a merchant can
+ * only request a change, which takes effect when staff (SHIPMENT_MANAGER_ROLES) approve it.
+ */
+export const PICKUP_ZONE_REQUEST_STATUSES = [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'WITHDRAWN',
+] as const;
+export type PickupZoneRequestStatus = (typeof PICKUP_ZONE_REQUEST_STATUSES)[number];
+
+export interface PickupZoneRequestItem {
+  id: string;
+  merchant: { id: string; businessName: string };
+  requestedZoneId: string;
+  previousZoneId: string | null;
+  status: PickupZoneRequestStatus;
+  decidedBy: { id: string; fullName: string } | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+}
+
+export interface MerchantPickupZoneState {
+  /** The zone prices are calculated from; null until staff set or approve one. */
+  approvedZoneId: string | null;
+  pending: PickupZoneRequestItem | null;
+  /** The most recent decided request, so the merchant can see a rejection and its note. */
+  lastDecision: PickupZoneRequestItem | null;
+}
+
+export const pickupZoneDecisionSchema = z.object({
+  note: z.string().trim().max(500, { error: 'validation.text.tooLong' }).optional(),
+});
+export type PickupZoneDecisionInput = z.infer<typeof pickupZoneDecisionSchema>;
 
 export interface ZoneOption {
   id: string;

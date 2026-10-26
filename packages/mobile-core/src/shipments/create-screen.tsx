@@ -12,7 +12,7 @@ import { Screen } from '../ui/screen';
 import { AppText } from '../ui/text';
 import { TextField } from '../ui/text-field';
 import { useDirection } from '../ui/use-direction';
-import { useCreateShipment, useQuote, useSetPickupZone, useZones } from './api';
+import { useCreateShipment, usePickupZone, useQuote, useRequestPickupZone, useZones } from './api';
 import { ChoiceField, Section } from './components';
 import { formatDateTime, formatMoney } from './format';
 
@@ -43,7 +43,9 @@ export function CreateShipmentScreen() {
   const zones = useZones();
   const quote = useQuote();
   const create = useCreateShipment();
-  const setPickup = useSetPickupZone();
+  // Refreshes the approved zone (staff may have approved a request since sign-in).
+  const pickup = usePickupZone();
+  const requestPickup = useRequestPickupZone();
   const options = zoneOptions(zones.data ?? [], language)
     .filter((option) => option.active)
     .map((option) => ({ value: option.id, label: option.path }));
@@ -88,20 +90,32 @@ export function CreateShipmentScreen() {
   }
 
   if (!pickupZoneId) {
+    const pending = pickup.data?.pending;
     return (
       <Screen>
-        <Banner message={t('errors.ORIGIN_ZONE_REQUIRED')} />
-        <ChoiceField
-          label={t('pricing.pickupTitle')}
-          placeholder={t('zones.choose')}
-          searchPlaceholder={t('zones.search')}
-          options={options}
-          value=""
-          onChange={(zoneId) => setPickup.mutate(zoneId)}
-          testID="pickup-zone"
-        />
-        <AppText variant="muted">{t('pricing.pickupHint')}</AppText>
-        <ErrorBanner error={setPickup.error ?? zones.error} />
+        {pending ? (
+          <Banner
+            tone="info"
+            message={`${t('pricing.pickupAwaiting')} ${t('pricing.pickupPending', {
+              zone: options.find((option) => option.value === pending.requestedZoneId)?.label ?? '',
+            })}`}
+          />
+        ) : (
+          <>
+            <Banner message={t('errors.ORIGIN_ZONE_REQUIRED')} />
+            <ChoiceField
+              label={t('pricing.pickupTitle')}
+              placeholder={t('zones.choose')}
+              searchPlaceholder={t('zones.search')}
+              options={options}
+              value=""
+              onChange={(zoneId) => requestPickup.mutate(zoneId)}
+              testID="pickup-zone"
+            />
+            <AppText variant="muted">{t('pricing.pickupHint')}</AppText>
+          </>
+        )}
+        <ErrorBanner error={requestPickup.error ?? pickup.error ?? zones.error} />
       </Screen>
     );
   }

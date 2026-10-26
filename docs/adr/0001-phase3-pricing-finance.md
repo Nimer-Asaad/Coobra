@@ -8,7 +8,8 @@
 - Zones are a database-managed hierarchy (`zones`, typed by configurable `zone_kinds`) with stable
   `code`s, Arabic/English names, parent, active flag and sort order. The 17 Phase 2 governorate codes
   are seeded as root zones; existing shipments keep their `governorate`/`city` text.
-- A merchant has a default pickup (origin) zone; a shipment may set its own origin.
+- A merchant has an approved pickup (origin) zone. Merchant quotes and shipments are always priced
+  from it; only staff may price from another origin (see section 10).
 - Rule precedence (first match wins): merchant route → general route → merchant fallback → general
   fallback → `422 PRICING_UNAVAILABLE`. A route rule matches when its origin/destination zone is the
   shipment's zone or one of its ancestors. Ties: deeper destination, deeper origin, higher `priority`,
@@ -121,3 +122,18 @@ Nothing is changed or deleted. Derived columns (COD status, collected total) are
 migration. Ledger postings for Phase 2 collections and fees are produced only by
 `pnpm finance:backfill-phase2`, which prints a dry-run report by default and posts only with
 `--execute` after explicit owner approval.
+
+## 10. Pre-merge hardening (2026-10-26)
+
+- **One posting per source across posting paths.** The live path and the Phase 2 backfill use
+  different journal kinds for the same source, which `(kind, source_type, source_id)` alone allows.
+  Partial unique indexes allow one entry per COD collection (`source_type = 'cod_collection'`)
+  and one per shipment delivery fee (`DELIVERY_FEE` or the backfilled `shipment_fee`). A violation
+  surfaces as `409 DUPLICATE_POSTING`. Fee corrections (`FEE_ADJUSTMENT`) are not covered: they
+  reverse the current fee entry, including a backfilled one, before re-posting.
+- **Pickup zone changes need staff approval.** A merchant can only request a new pickup zone
+  (`pickup_zone_requests`); the approved zone keeps pricing their shipments until SUPER_ADMIN or
+  OPERATIONS approve it. At most one pending request per merchant (partial unique index); a new
+  request replaces the pending one. The database rejects a decision by the requesting merchant and
+  an approval or rejection without a staff decider. Staff can still set a zone directly. Existing
+  approved zones are kept unchanged.
