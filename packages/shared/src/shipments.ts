@@ -229,6 +229,12 @@ function parseMoney(value: unknown, max: number, ctx: z.RefinementCtx): string {
   return amount;
 }
 
+/** Exact comparison of normalised amounts ("12.50") in integer cents, never floating point. */
+export function moneyToCents(amount: string): bigint {
+  const [whole = '0', fraction = ''] = amount.split('.');
+  return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0').slice(0, 2));
+}
+
 /** A required amount (string or number in, normalised decimal string out). */
 export function moneySchema(max: number) {
   return z.unknown().transform((value, ctx) => parseMoney(value, max, ctx));

@@ -39,6 +39,8 @@ export const ERROR_CODES = [
   'INVALID_STATE',
   'INSUFFICIENT_FUNDS',
   'DUPLICATE_POSTING',
+  /** The admin BFF could not reach the API (outage or restart). */
+  'SERVICE_UNAVAILABLE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

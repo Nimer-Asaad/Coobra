@@ -488,6 +488,10 @@ function PricingCard({
                 {pricing.returnFee
                   ? formatMoney(pricing.returnFee, lang)
                   : t('pricing.returnFeeUnset')}
+                <span className="block text-sm text-muted-foreground">
+                  {t(`pricing.returnPolicies.${pricing.returnPolicy}`)}
+                  {pricing.attemptFee ? ` · ${formatMoney(pricing.attemptFee, lang)}` : ''}
+                </span>
               </Item>
               <Item label={t('pricing.origin')}>{zoneText(pricing.origin, lang) ?? '—'}</Item>
             </>

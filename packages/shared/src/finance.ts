@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { reasonTextSchema } from './pricing.js';
 import type { UserRole } from './roles.js';
-import { MAX_COD_AMOUNT, moneySchema, type Currency } from './shipments.js';
+import { MAX_COD_AMOUNT, moneySchema, toAsciiDigits, type Currency } from './shipments.js';
 
 /*
  * Phase 3 finance contracts. Amounts are decimal strings; balances follow the ledger sign
@@ -15,6 +15,28 @@ export const FINANCE_VIEW_ROLES = [
   'SUPER_ADMIN',
   'ACCOUNTANT',
   'OWNER_VIEWER',
+] as const satisfies readonly UserRole[];
+/**
+ * May register a driver's declared cash hand-over at the counter. The settlement stays
+ * SUBMITTED until an accountant counts the cash (CASH_COUNT_ROLES).
+ */
+export const SETTLEMENT_RECORDER_ROLES = [
+  'SUPER_ADMIN',
+  'ACCOUNTANT',
+  'OPERATIONS',
+] as const satisfies readonly UserRole[];
+/**
+ * Counting cash is the accountant's job: only an accountant confirms or rejects a driver
+ * settlement, records a cash discrepancy (shortage) and posts a driver's debt repayment. A
+ * settlement is never decided by the person who registered it.
+ */
+export const CASH_COUNT_ROLES = ['ACCOUNTANT'] as const satisfies readonly UserRole[];
+/** May see driver settlements (operations see what they registered and its outcome). */
+export const SETTLEMENT_VIEW_ROLES = [
+  'SUPER_ADMIN',
+  'ACCOUNTANT',
+  'OWNER_VIEWER',
+  'OPERATIONS',
 ] as const satisfies readonly UserRole[];
 /** May propose how a recipient shortfall is resolved (approval is a separate person). */
 export const SHORTFALL_PROPOSER_ROLES = [
@@ -231,10 +253,29 @@ export const driverShortageSchema = z.object({
 });
 export type DriverShortageInput = z.infer<typeof driverShortageSchema>;
 
+/**
+ * Normalises a receipt / transfer reference so the same paper receipt cannot be entered twice
+ * with different spelling: ASCII digits, upper case, single spaces.
+ */
+export function normalizeReceiptReference(value: string): string {
+  return toAsciiDigits(value).trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+export const receiptReferenceSchema = z
+  .string({ error: 'validation.finance.receiptReference' })
+  .transform(normalizeReceiptReference)
+  .pipe(
+    z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N} ./#-]{1,63}$/u, {
+      error: 'validation.finance.receiptReference',
+    }),
+  );
+
 export const driverRepaymentSchema = z.object({
   driverId: z.uuid({ error: 'validation.driver.required' }),
   amount: moneySchema(1_000_000),
   channel,
+  /** The receipt number (cash) or transfer reference (bank, e-wallet) of this payment. */
+  receiptReference: receiptReferenceSchema,
   note,
 });
 export type DriverRepaymentInput = z.infer<typeof driverRepaymentSchema>;
@@ -245,10 +286,12 @@ export interface SettlementItem {
   status: 'SUBMITTED' | 'CONFIRMED' | 'REJECTED';
   declaredAmount: string;
   countedAmount: string | null;
+  /** Declared minus counted once confirmed (what stayed in the driver's custody). */
+  discrepancy: string | null;
   channel: CashChannel;
   note: string | null;
-  submittedBy: PersonRef;
-  decidedBy: PersonRef | null;
+  submittedBy: PersonRef & { role: UserRole };
+  decidedBy: (PersonRef & { role: UserRole }) | null;
   decidedAt: string | null;
   decisionNote: string | null;
   clearings: { shipment: { id: string; trackingNumber: string }; amount: string }[];
@@ -400,10 +443,29 @@ export interface MerchantBalanceRow extends Omit<MerchantFinanceSummary, 'payout
 
 /** A ledger figure recomputed from operational records; `difference` must be "0.00". */
 export interface ReconciliationCheck {
-  key: 'TRIAL_BALANCE' | 'DRIVER_CUSTODY' | 'MERCHANT_COD_PENDING' | 'MERCHANT_PAYOUTS';
+  key:
+    | 'TRIAL_BALANCE'
+    | 'DRIVER_CUSTODY'
+    | 'MERCHANT_COD_PENDING'
+    | 'MERCHANT_PAYOUTS'
+    | 'MERCHANT_ADJUSTMENTS';
   ledger: string;
   operational: string;
   difference: string;
+}
+
+/**
+ * Approved merchant settlement adjustments in a period. The ledger keeps them in one net
+ * account (ADJUSTMENT_EXPENSE, ADR 0001); reports show each direction as a positive amount:
+ * credits to merchants (debited to the account) and debits to merchants (credited to it).
+ */
+export interface MerchantAdjustmentTotals {
+  credits: string;
+  creditCount: number;
+  debits: string;
+  debitCount: number;
+  /** credits − debits: positive = net credited to merchants, negative = net charged to them. */
+  net: string;
 }
 
 export interface FinanceOverview {
@@ -425,7 +487,7 @@ export interface FinanceOverview {
     returnFees: string;
     codShortfallExpense: string;
     driverCashLossExpense: string;
-    adjustmentExpense: string;
+    merchantAdjustments: MerchantAdjustmentTotals;
   };
   queues: {
     shortfallsOpen: number;
@@ -464,5 +526,6 @@ export const CSV_REPORTS = [
   'driver-balances',
   'journal',
   'delivered-shipments',
+  'merchant-adjustments',
 ] as const;
 export type CsvReport = (typeof CSV_REPORTS)[number];

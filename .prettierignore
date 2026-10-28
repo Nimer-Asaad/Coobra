@@ -9,3 +9,11 @@ pnpm-lock.yaml
 **/.claude
 **/.windsurf
 **/skills-lock.json
+
+# End-to-end run outputs (generated, never committed)
+packages/e2e/.auth/
+packages/e2e/test-results/
+packages/e2e/playwright-report/
+packages/e2e/.web/
+**/.e2e-dist
+**/.next-e2e

@@ -1,6 +1,6 @@
 import type { Language } from './language.js';
 import type { CodStatus, ShipmentCodInfo } from './finance.js';
-import type { ShipmentPricingInfo, ZoneLabel } from './pricing.js';
+import type { ReturnFeePolicy, ShipmentPricingInfo, ZoneLabel } from './pricing.js';
 import type { Currency, ReturnFeeStatus, ShipmentStatus } from './shipments.js';
 import type { ClientApp, UserRole } from './roles.js';
 
@@ -187,8 +187,15 @@ export interface ShipmentReturnInfo {
   approvedBy: { id: string; fullName: string } | null;
   returnDriver: ShipmentPerson | null;
   feeStatus: ReturnFeeStatus;
+  /** The return fee itself (null while unconfigured). */
   feeAmount: string | null;
   feeReason: string | null;
+  /** Policy from the shipment's pricing snapshot. */
+  feePolicy: ReturnFeePolicy;
+  /** Delivery or failed-attempt fee charged with the return ("0.00" for RETURN_ONLY). */
+  deliveryCharge: string;
+  /** Everything charged for the return (null while the return fee is unconfigured). */
+  totalCharge: string | null;
   completedAt: string | null;
   closedAt: string | null;
 }

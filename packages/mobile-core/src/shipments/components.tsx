@@ -52,6 +52,7 @@ export function ShipmentCard({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={`${shipment.trackingNumber} · ${shipment.recipientName} · ${t(`shipmentStatus.${shipment.status}`)}`}
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       testID={`shipment-${shipment.trackingNumber}`}
@@ -146,6 +147,7 @@ export function ChipBar<T extends string>({
           <Pressable
             key={option.value}
             accessibilityRole="button"
+            accessibilityLabel={option.label}
             accessibilityState={{ selected }}
             onPress={() => onChange(option.value)}
             style={[styles.chip, selected && styles.chipSelected]}
@@ -223,6 +225,8 @@ export function ChoiceField<T extends string>({
             <Pressable
               key={option.value}
               accessibilityRole="button"
+              accessibilityLabel={option.label}
+              accessibilityState={{ selected: option.value === value }}
               onPress={() => {
                 onChange(option.value);
                 setOpen(false);

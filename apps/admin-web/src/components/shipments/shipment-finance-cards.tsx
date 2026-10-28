@@ -13,7 +13,7 @@ import { FormField } from '@/components/form-field';
 import { ReturnInfoBlock } from '@/components/returns/return-actions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { bff } from '@/lib/api-client';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatMoney } from '@/lib/format';
 
 const text = (form: FormData, key: string) => String(form.get(key) ?? '').trim();
 
@@ -36,6 +36,9 @@ export function CodCard({
   );
   const fieldError = useFieldError(correction.error);
   const tone = cod.status === 'PARTIAL' ? 'bad' : cod.status === 'PENDING' ? 'warn' : 'ok';
+  const pendingCorrection = shipment.pricing?.overrides.find(
+    (override) => override.phase === 'POST_DELIVERY' && override.status === 'PENDING_APPROVAL',
+  );
 
   return (
     <Card>
@@ -88,11 +91,22 @@ export function CodCard({
               : ''}
           </p>
         ) : null}
-        {canCorrectFee && shipment.status === 'DELIVERED' ? (
+        {pendingCorrection ? (
+          <p role="status">
+            <StatusPill tone="warn">
+              {t('finance.feeCorrectionPending', {
+                from: formatMoney(pendingCorrection.previousFee ?? '0', i18n.language),
+                to: formatMoney(pendingCorrection.newFee, i18n.language),
+              })}
+            </StatusPill>
+          </p>
+        ) : null}
+        {canCorrectFee && shipment.status === 'DELIVERED' && !pendingCorrection ? (
           <div className="flex flex-col gap-1">
             <p className="text-muted-foreground">{t('finance.feeCorrectionHint')}</p>
             <InlineAction
               label={t('finance.requestFeeCorrection')}
+              successMessage={t('finance.feeCorrectionRequested')}
               pending={correction.isPending}
               error={correction.error}
               onSubmit={(form) =>

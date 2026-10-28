@@ -393,30 +393,45 @@ enum PricingSource {
   LEGACY
 }
 
+/// What a returned (never delivered) shipment is charged. RETURN_ONLY is the Phase 3
+/// behaviour and the default for every rule, snapshot and return record that predates it.
+enum ReturnFeePolicy {
+  /// Only the return fee.
+  RETURN_ONLY
+  /// The shipment's delivery fee plus the return fee (after a failed delivery attempt).
+  DELIVERY_PLUS_RETURN
+  /// The rule's failed-attempt fee plus the return fee (after a failed delivery attempt).
+  REDUCED_ATTEMPT_PLUS_RETURN
+}
+
 /// A versioned delivery price. Editing creates a new version (same `ruleGroupId`) and deactivates
 /// the previous one, so the rule a shipment was priced with is always preserved.
 model PricingRule {
-  id                String    @id @default(uuid(7)) @db.Uuid
-  ruleGroupId       String    @map("rule_group_id") @db.Uuid
-  version           Int       @default(1)
+  id                String          @id @default(uuid(7)) @db.Uuid
+  ruleGroupId       String          @map("rule_group_id") @db.Uuid
+  version           Int             @default(1)
   /// Null = general rule; otherwise only for this merchant.
-  merchantId        String?   @map("merchant_id") @db.Uuid
-  originZoneId      String?   @map("origin_zone_id") @db.Uuid
-  destinationZoneId String?   @map("destination_zone_id") @db.Uuid
+  merchantId        String?         @map("merchant_id") @db.Uuid
+  originZoneId      String?         @map("origin_zone_id") @db.Uuid
+  destinationZoneId String?         @map("destination_zone_id") @db.Uuid
   /// Explicit fallback: applies when no route rule matches (zones must be null).
-  isFallback        Boolean   @default(false) @map("is_fallback")
-  deliveryFee       Decimal   @map("delivery_fee") @db.Decimal(12, 2)
+  isFallback        Boolean         @default(false) @map("is_fallback")
+  deliveryFee       Decimal         @map("delivery_fee") @db.Decimal(12, 2)
   /// Null = return fee not configured (RETURN_FEE_UNCONFIGURED).
-  returnFee         Decimal?  @map("return_fee") @db.Decimal(12, 2)
-  currency          Currency  @default(ILS)
-  priority          Int       @default(0)
-  effectiveFrom     DateTime  @default(now()) @map("effective_from")
-  effectiveTo       DateTime? @map("effective_to")
-  active            Boolean   @default(true)
+  returnFee         Decimal?        @map("return_fee") @db.Decimal(12, 2)
+  /// What a return is charged. Part of the version: changing it creates a new version.
+  returnPolicy      ReturnFeePolicy @default(RETURN_ONLY) @map("return_policy")
+  /// Failed-attempt fee; set only (and required) for REDUCED_ATTEMPT_PLUS_RETURN (DB check).
+  attemptFee        Decimal?        @map("attempt_fee") @db.Decimal(12, 2)
+  currency          Currency        @default(ILS)
+  priority          Int             @default(0)
+  effectiveFrom     DateTime        @default(now()) @map("effective_from")
+  effectiveTo       DateTime?       @map("effective_to")
+  active            Boolean         @default(true)
   note              String?
-  createdById       String?   @map("created_by_id") @db.Uuid
-  createdAt         DateTime  @default(now()) @map("created_at")
-  supersededAt      DateTime? @map("superseded_at")
+  createdById       String?         @map("created_by_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at")
+  supersededAt      DateTime?       @map("superseded_at")
 
   merchant        User?             @relation("PricingRuleMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
   originZone      Zone?             @relation("PricingRuleOrigin", fields: [originZoneId], references: [id], onDelete: Restrict)
@@ -492,22 +507,26 @@ model PricingQuote {
 
 /// Immutable record of how a shipment was priced. Rule changes never touch it.
 model ShipmentPricing {
-  shipmentId        String        @id @map("shipment_id") @db.Uuid
-  quoteId           String?       @unique @map("quote_id") @db.Uuid
-  ruleId            String?       @map("rule_id") @db.Uuid
-  ruleVersion       Int?          @map("rule_version")
+  shipmentId        String          @id @map("shipment_id") @db.Uuid
+  quoteId           String?         @unique @map("quote_id") @db.Uuid
+  ruleId            String?         @map("rule_id") @db.Uuid
+  ruleVersion       Int?            @map("rule_version")
   source            PricingSource
-  originZoneId      String?       @map("origin_zone_id") @db.Uuid
-  destinationZoneId String?       @map("destination_zone_id") @db.Uuid
+  originZoneId      String?         @map("origin_zone_id") @db.Uuid
+  destinationZoneId String?         @map("destination_zone_id") @db.Uuid
   /// Automatically calculated fee (null when no rule applied).
-  baseFee           Decimal?      @map("base_fee") @db.Decimal(12, 2)
+  baseFee           Decimal?        @map("base_fee") @db.Decimal(12, 2)
   /// Fee charged when priced (later changes are recorded as overrides).
-  finalFee          Decimal       @map("final_fee") @db.Decimal(12, 2)
+  finalFee          Decimal         @map("final_fee") @db.Decimal(12, 2)
   /// Return fee from the rule; null = not configured.
-  returnFee         Decimal?      @map("return_fee") @db.Decimal(12, 2)
-  currency          Currency      @default(ILS)
-  pricedAt          DateTime      @default(now()) @map("priced_at")
-  pricedById        String?       @map("priced_by_id") @db.Uuid
+  returnFee         Decimal?        @map("return_fee") @db.Decimal(12, 2)
+  /// The rule's return policy when priced (RETURN_ONLY when no rule applied).
+  returnPolicy      ReturnFeePolicy @default(RETURN_ONLY) @map("return_policy")
+  /// The rule's failed-attempt fee when priced (REDUCED_ATTEMPT_PLUS_RETURN only).
+  attemptFee        Decimal?        @map("attempt_fee") @db.Decimal(12, 2)
+  currency          Currency        @default(ILS)
+  pricedAt          DateTime        @default(now()) @map("priced_at")
+  pricedById        String?         @map("priced_by_id") @db.Uuid
 
   shipment Shipment     @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
   rule     PricingRule? @relation(fields: [ruleId], references: [id], onDelete: Restrict)
@@ -883,18 +902,23 @@ model CashClearing {
 
 /// A driver paying back an amount they were held liable for.
 model DriverRepayment {
-  id             String      @id @default(uuid(7)) @db.Uuid
-  driverId       String      @map("driver_id") @db.Uuid
-  amount         Decimal     @db.Decimal(12, 2)
-  channel        CashChannel @default(HUB)
-  note           String?
-  recordedById   String      @map("recorded_by_id") @db.Uuid
-  journalEntryId String      @unique @map("journal_entry_id") @db.Uuid
-  createdAt      DateTime    @default(now()) @map("created_at")
+  id               String      @id @default(uuid(7)) @db.Uuid
+  driverId         String      @map("driver_id") @db.Uuid
+  amount           Decimal     @db.Decimal(12, 2)
+  channel          CashChannel @default(HUB)
+  /// The receipt or transfer reference of the real payment (normalised). Unique per channel, so
+  /// the same cash cannot be posted twice by different accountants. Null only for repayments
+  /// recorded before references existed.
+  receiptReference String?     @map("receipt_reference")
+  note             String?
+  recordedById     String      @map("recorded_by_id") @db.Uuid
+  journalEntryId   String      @unique @map("journal_entry_id") @db.Uuid
+  createdAt        DateTime    @default(now()) @map("created_at")
 
   driver     User @relation("RepaymentDriver", fields: [driverId], references: [id], onDelete: Restrict)
   recordedBy User @relation("RepaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
 
+  @@unique([channel, receiptReference])
   @@index([driverId])
   @@map("driver_repayments")
 }
@@ -1013,7 +1037,13 @@ model ReturnRecord {
   /// The delivery driver before the return was assigned (for the record).
   originalDriverId String?         @map("original_driver_id") @db.Uuid
   feeStatus        ReturnFeeStatus @map("fee_status")
+  /// The return fee itself (excludes `deliveryCharge`).
   feeAmount        Decimal?        @map("fee_amount") @db.Decimal(12, 2)
+  /// Policy copied from the pricing snapshot when the return record is created.
+  feePolicy        ReturnFeePolicy @default(RETURN_ONLY) @map("fee_policy")
+  /// Delivery or failed-attempt fee charged with the return (0 for RETURN_ONLY), fixed when the
+  /// record is created. Posted together with the return fee, or waived with it.
+  deliveryCharge   Decimal         @default(0) @map("delivery_charge") @db.Decimal(12, 2)
   feeSetById       String?         @map("fee_set_by_id") @db.Uuid
   feeSetAt         DateTime?       @map("fee_set_at")
   feeReason        String?         @map("fee_reason")

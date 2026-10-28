@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
-import { Prisma, type PricingRule } from '@coobra/database';
+import { Prisma, type PricingRule, type ReturnFeePolicy } from '@coobra/database';
 import {
   QUOTE_TTL_MINUTES,
   type CreatePricingRuleInput,
@@ -39,6 +39,8 @@ export interface PriceResult {
   destination: ZonePath;
   fee: Prisma.Decimal;
   returnFee: Prisma.Decimal | null;
+  returnPolicy: ReturnFeePolicy;
+  attemptFee: Prisma.Decimal | null;
 }
 
 const money = (value: Prisma.Decimal) => value.toFixed(2);
@@ -117,6 +119,8 @@ export class PricingService {
       destination,
       fee: rule.deliveryFee,
       returnFee: rule.returnFee,
+      returnPolicy: rule.returnPolicy,
+      attemptFee: rule.attemptFee,
     };
   }
 
@@ -143,6 +147,8 @@ export class PricingService {
       baseFee: money(result.fee),
       finalFee: money(result.fee),
       returnFee: result.returnFee ? money(result.returnFee) : null,
+      returnPolicy: result.returnPolicy,
+      attemptFee: result.attemptFee ? money(result.attemptFee) : null,
       currency: 'ILS',
       quotedAt: (quote?.createdAt ?? new Date()).toISOString(),
       expiresAt: quote?.expiresAt.toISOString() ?? null,
@@ -263,6 +269,8 @@ export class PricingService {
         isFallback: rule.isFallback,
         deliveryFee: money(rule.deliveryFee),
         returnFee: rule.returnFee ? money(rule.returnFee) : null,
+        returnPolicy: rule.returnPolicy,
+        attemptFee: rule.attemptFee ? money(rule.attemptFee) : null,
         currency: 'ILS',
         priority: rule.priority,
         effectiveFrom: rule.effectiveFrom.toISOString(),
@@ -295,6 +303,8 @@ export class PricingService {
         isFallback: input.isFallback,
         deliveryFee: input.deliveryFee,
         returnFee: input.returnFee ?? null,
+        returnPolicy: input.returnPolicy,
+        attemptFee: input.attemptFee ?? null,
         priority: input.priority,
         ...(input.effectiveFrom ? { effectiveFrom: new Date(input.effectiveFrom) } : {}),
         effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
@@ -311,6 +321,8 @@ export class PricingService {
         ruleId: rule.id,
         deliveryFee: money(rule.deliveryFee),
         returnFee: rule.returnFee ? money(rule.returnFee) : null,
+        returnPolicy: rule.returnPolicy,
+        attemptFee: rule.attemptFee ? money(rule.attemptFee) : null,
         isFallback: rule.isFallback,
       },
     });
@@ -330,6 +342,16 @@ export class PricingService {
       });
       if (retired.count !== 1)
         throw Errors.conflict('Only the active version of a rule can be revised');
+      // Without a new policy the current one (and its attempt fee) is kept, never reset.
+      const returnPolicy = input.returnPolicy ?? current.returnPolicy;
+      const attemptFee = input.returnPolicy
+        ? input.attemptFee
+          ? new Prisma.Decimal(input.attemptFee)
+          : null
+        : current.attemptFee;
+      if (attemptFee?.greaterThan(input.deliveryFee)) {
+        throw Errors.validation({ attemptFee: 'validation.pricing.attemptFeeTooHigh' });
+      }
       return tx.pricingRule.create({
         data: {
           ruleGroupId: current.ruleGroupId,
@@ -340,6 +362,8 @@ export class PricingService {
           isFallback: current.isFallback,
           deliveryFee: input.deliveryFee,
           returnFee: input.returnFee ?? null,
+          returnPolicy,
+          attemptFee,
           priority: input.priority,
           effectiveFrom: now,
           effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
@@ -358,6 +382,9 @@ export class PricingService {
         ruleId: next.id,
         version: next.version,
         deliveryFee: money(next.deliveryFee),
+        returnFee: next.returnFee ? money(next.returnFee) : null,
+        returnPolicy: next.returnPolicy,
+        attemptFee: next.attemptFee ? money(next.attemptFee) : null,
       },
     });
     return next;

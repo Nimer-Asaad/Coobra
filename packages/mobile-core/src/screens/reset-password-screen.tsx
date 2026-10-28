@@ -42,6 +42,7 @@ export function ResetPasswordScreen({ token }: { token: string | undefined }) {
             autoComplete="new-password"
             hint={t('auth.register.passwordHint', validationParams)}
             error={fieldErrors.password ?? fieldErrors.token}
+            onSubmitEditing={submit}
           />
           <AppButton title={t('auth.reset.submit')} onPress={submit} loading={reset.isPending} />
         </>

@@ -171,7 +171,13 @@ function MerchantFinance() {
               <AppButton
                 variant="link"
                 title={t('finance.merchantView.withdraw')}
-                onPress={() => withdraw.mutate({ id: payout.id, note: 'Withdrawn by merchant' })}
+                onPress={() =>
+                  withdraw.mutate(
+                    { id: payout.id, note: 'Withdrawn by merchant' },
+                    // The "payout requested" notice no longer describes the list.
+                    { onSuccess: () => request.reset() },
+                  )
+                }
               />
             ) : null}
           </View>

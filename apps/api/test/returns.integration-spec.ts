@@ -104,6 +104,25 @@ describe('Returns workflow (PostgreSQL integration)', () => {
       status: 'RETURN_APPROVED',
       driver: { id: returnDriver.id },
     });
+    // QA BUG-005: confirming again with the same driver is a no-op (no duplicate history);
+    // choosing another driver is a reassignment and is recorded.
+    const historyCount = () =>
+      ctx.prisma.shipmentStatusHistory.count({
+        where: { shipmentId: id, toStatus: 'RETURN_APPROVED' },
+      });
+    await api(ops)
+      .post(`/v1/admin/shipments/${id}/return/approve`, { driverId: returnDriver.id })
+      .expect(200);
+    expect(await historyCount()).toBe(1);
+    await api(ops)
+      .post(`/v1/admin/shipments/${id}/return/approve`, { driverId: driver.id })
+      .expect(200);
+    expect(await historyCount()).toBe(2);
+    await api(ops)
+      .post(`/v1/admin/shipments/${id}/return/approve`, { driverId: returnDriver.id })
+      .expect(200);
+    expect(await historyCount()).toBe(3);
+
     // The return task belongs to the return driver only.
     await api(driver).get(`/v1/driver/shipments/${id}`).expect(404);
     const tasks = await api(returnDriver).get('/v1/driver/shipments?scope=active').expect(200);
@@ -127,6 +146,8 @@ describe('Returns workflow (PostgreSQL integration)', () => {
       'OUT_FOR_DELIVERY',
       'DELIVERY_FAILED',
       'RETURN_REQUESTED',
+      'RETURN_APPROVED',
+      'RETURN_APPROVED',
       'RETURN_APPROVED',
       'RETURN_IN_TRANSIT',
       'RETURNED_TO_HUB',

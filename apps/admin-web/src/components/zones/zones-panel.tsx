@@ -124,11 +124,12 @@ function ZoneRow({
 }) {
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
+  const name = i18n.language === 'ar' ? zone.nameAr : zone.nameEn;
   return (
     <li className="flex flex-col gap-2 py-2.5" style={{ paddingInlineStart: `${depth * 1.25}rem` }}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className={cn('min-w-0', !effectiveActive && 'text-muted-foreground')}>
-          <span className="font-medium">{i18n.language === 'ar' ? zone.nameAr : zone.nameEn}</span>{' '}
+          <span className="font-medium">{name}</span>{' '}
           <span className="text-xs text-muted-foreground">
             {kind} ·{' '}
             <span dir="ltr" className="font-mono">
@@ -141,13 +142,19 @@ function ZoneRow({
         </div>
         {canManage ? (
           <div className="flex gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setEditing((value) => !value)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={`${t('zones.rename')} · ${name}`}
+              onClick={() => setEditing((value) => !value)}
+            >
               {t('zones.rename')}
             </Button>
             <Button
               size="sm"
               variant="outline"
               disabled={pending}
+              aria-label={`${zone.active ? t('zones.deactivate') : t('zones.activate')} · ${name}`}
               onClick={() => onUpdate({ active: !zone.active })}
             >
               {zone.active ? t('zones.deactivate') : t('zones.activate')}

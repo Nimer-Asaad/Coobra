@@ -121,6 +121,100 @@ describe('Finance reports, reconciliation and Phase 2 backfill (PostgreSQL integ
     await assertLedgerInvariants(ctx.prisma);
   });
 
+  it('reports merchant debits and credits separately without changing the ledger', async () => {
+    const approver = await createSignedInUser(ctx, 'ACCOUNTANT', 'acc2@example.com');
+    const adjust = async (type: string, amount: string, decision: 'approve' | 'reject' | null) => {
+      const created = await api(accountant)
+        .post('/v1/admin/finance/adjustments', {
+          merchantId: merchant.id,
+          type,
+          amount,
+          reason: `QA ${type} ${amount}`,
+        })
+        .expect(201);
+      if (decision) {
+        await api(approver)
+          .post(
+            `/v1/admin/finance/adjustments/${created.body.id}/${decision}`,
+            decision === 'reject' ? { note: 'Not justified' } : {},
+            newKey(),
+          )
+          .expect(200);
+      }
+    };
+    await adjust('MERCHANT_CREDIT', '50', 'approve');
+    await adjust('MERCHANT_DEBIT', '80', 'approve');
+    await adjust('MERCHANT_DEBIT', '15', 'reject');
+    await adjust('MERCHANT_CREDIT', '9', null);
+
+    // The ledger keeps its net-account design: debits and credits unchanged.
+    expect(await ledgerBalance(ctx.prisma, 'ADJUSTMENT_EXPENSE')).toBe('-30.00');
+    expect(await ledgerBalance(ctx.prisma, `MERCHANT_BALANCE:${merchant.id}`)).toBe('-30.00');
+    const lines = await ctx.prisma.journalLine.findMany({
+      where: { entry: { kind: 'MERCHANT_ADJUSTMENT' } },
+      include: { account: true },
+    });
+    expect(
+      lines.map((line) => `${line.account.purpose}:${line.side}:${line.amount.toFixed(2)}`).sort(),
+    ).toEqual([
+      'ADJUSTMENT_EXPENSE:CREDIT:80.00',
+      'ADJUSTMENT_EXPENSE:DEBIT:50.00',
+      'MERCHANT_BALANCE:CREDIT:50.00',
+      'MERCHANT_BALANCE:DEBIT:80.00',
+    ]);
+
+    // Reports: each direction as a positive amount, the net with its direction.
+    const overview = (await api(viewer).get('/v1/admin/finance/overview').expect(200))
+      .body as FinanceOverview;
+    expect(overview.period.merchantAdjustments).toEqual({
+      credits: '50.00',
+      creditCount: 1,
+      debits: '80.00',
+      debitCount: 1,
+      net: '-30.00',
+    });
+    expect(overview.period).not.toHaveProperty('adjustmentExpense');
+    expect(overview.merchantOwing).toBe('30.00');
+    const check = overview.reconciliation.find((item) => item.key === 'MERCHANT_ADJUSTMENTS');
+    expect(check).toEqual({
+      key: 'MERCHANT_ADJUSTMENTS',
+      ledger: '-30.00',
+      operational: '-30.00',
+      difference: '0.00',
+    });
+    for (const item of overview.reconciliation) expect(item.difference).toBe('0.00');
+
+    // A period without adjustments shows zeros, not the all-time totals.
+    const future = (
+      await api(viewer).get('/v1/admin/finance/overview?from=2999-01-01T00:00:00.000Z').expect(200)
+    ).body as FinanceOverview;
+    expect(future.period.merchantAdjustments).toMatchObject({ credits: '0.00', debits: '0.00' });
+
+    const csv = await api(viewer)
+      .get('/v1/admin/finance/reports/merchant-adjustments.csv')
+      .expect(200);
+    expect(csv.text.charCodeAt(0)).toBe(0xfeff);
+    const rows = csv.text
+      .replace(/^\uFEFF/, '')
+      .trim()
+      .split('\r\n');
+    expect(rows[0]).toBe(
+      'requested_at,decided_at,merchant,type,direction,amount,status,reason,requested_by,decided_by,journal_entry_id',
+    );
+    const body = rows.slice(1).map((row) => row.split(',').slice(3, 7).join(','));
+    expect(body).toEqual([
+      'MERCHANT_CREDIT,credit_to_merchant,50.00,APPLIED',
+      'MERCHANT_DEBIT,debit_to_merchant,80.00,APPLIED',
+      'MERCHANT_DEBIT,debit_to_merchant,15.00,REJECTED',
+      'MERCHANT_CREDIT,credit_to_merchant,9.00,PENDING_APPROVAL',
+    ]);
+    // No amount is ever negative in the export.
+    expect(rows.slice(1).every((row) => !row.split(',')[5]!.startsWith('-'))).toBe(true);
+    await api(merchant).get('/v1/admin/finance/reports/merchant-adjustments.csv').expect(403);
+    await api(ops).get('/v1/admin/finance/reports/merchant-adjustments.csv').expect(403);
+    await assertLedgerInvariants(ctx.prisma);
+  });
+
   it('backfills Phase 2 records only on execute, exactly once', async () => {
     // Simulate Phase 2 data: delivered with a collection record, written before the ledger existed.
     const created = await api(merchant)

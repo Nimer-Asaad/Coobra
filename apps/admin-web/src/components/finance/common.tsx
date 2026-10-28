@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ErrorAlert } from '@/components/error-alert';
 import { Button } from '@/components/ui/button';
@@ -50,16 +50,28 @@ export function useFinanceAction<TInput, TResult>(
   });
 }
 
+/** True inside an InlineAction whose form changed since the last attempt. */
+const FormEditedContext = createContext(false);
+
+function FieldErrorText({ children }: { children: ReactNode }) {
+  const edited = useContext(FormEditedContext);
+  return edited ? null : <p className="text-sm text-destructive">{children}</p>;
+}
+
 /** Field errors returned by the API for a form (validation keys → translated text). */
 export function useFieldError(error: unknown) {
   const { t } = useTranslation();
   return function renderFieldError(name: string) {
     const key = error instanceof ClientApiError ? error.body.fieldErrors?.[name] : undefined;
-    return key ? <p className="text-sm text-destructive">{translateValidation(t, key)}</p> : null;
+    return key ? <FieldErrorText>{translateValidation(t, key)}</FieldErrorText> : null;
   };
 }
 
-/** A button that opens a small inline form; closes on success. */
+/**
+ * A button that opens a small inline form; closes on success and confirms what happened.
+ * An error from the last attempt is hidden as soon as the user edits the form, so it never
+ * describes input that is no longer there.
+ */
 export function InlineAction({
   label,
   variant = 'outline',
@@ -68,6 +80,7 @@ export function InlineAction({
   onSubmit,
   children,
   submitLabel,
+  successMessage,
 }: {
   label: string;
   variant?: 'outline' | 'default' | 'destructive' | 'ghost';
@@ -76,34 +89,62 @@ export function InlineAction({
   onSubmit: (form: FormData) => Promise<unknown> | void;
   children?: ReactNode;
   submitLabel?: string;
+  /** Shown after success; defaults to a generic "Saved." */
+  successMessage?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [done, setDone] = useState(false);
+  const [edited, setEdited] = useState(false);
   if (!open) {
     return (
-      <Button size="sm" variant={variant} onClick={() => setOpen(true)}>
-        {label}
-      </Button>
+      <div className="flex flex-col items-start gap-2">
+        {done ? (
+          <p role="status" className="text-sm text-emerald-700">
+            {successMessage ?? t('finance.actionDone')}
+          </p>
+        ) : null}
+        <Button
+          size="sm"
+          variant={variant}
+          onClick={() => {
+            setDone(false);
+            setEdited(true);
+            setOpen(true);
+          }}
+        >
+          {label}
+        </Button>
+      </div>
     );
   }
+  const visibleError = edited ? null : error;
   return (
     <form
       noValidate
       className="flex w-full flex-col gap-2 rounded-md border p-3"
+      onChange={() => setEdited(true)}
+      onFocus={(event) => {
+        // Prefilled amounts (counted cash, corrected fee) are replaced, not appended to.
+        const target = event.target;
+        if (target instanceof HTMLInputElement && target.inputMode === 'decimal') target.select();
+      }}
       onSubmit={async (event) => {
         event.preventDefault();
+        setEdited(false);
         try {
           await onSubmit(new FormData(event.currentTarget));
           setOpen(false);
+          setDone(true);
         } catch {
           // Shown below through `error`.
         }
       }}
     >
       <p className="text-sm font-medium">{label}</p>
-      {children}
-      {error instanceof ClientApiError && error.body.fieldErrors ? null : (
-        <ErrorAlert error={error} />
+      <FormEditedContext.Provider value={edited}>{children}</FormEditedContext.Provider>
+      {visibleError instanceof ClientApiError && visibleError.body.fieldErrors ? null : (
+        <ErrorAlert error={visibleError} />
       )}
       <div className="flex gap-2">
         <Button

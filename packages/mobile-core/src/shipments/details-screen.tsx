@@ -249,6 +249,18 @@ export function ShipmentDetailsScreen() {
               s.returnInfo.feeAmount ? ` · ${formatMoney(s.returnInfo.feeAmount, language)}` : ''
             }`}
           />
+          {s.returnInfo.deliveryCharge !== '0.00' ? (
+            <InfoRow
+              label={t('returns.deliveryCharge')}
+              value={formatMoney(s.returnInfo.deliveryCharge, language)}
+            />
+          ) : null}
+          {s.returnInfo.totalCharge !== null ? (
+            <InfoRow
+              label={t('returns.totalCharge')}
+              value={formatMoney(s.returnInfo.totalCharge, language)}
+            />
+          ) : null}
           {s.returnInfo.returnDriver ? (
             <InfoRow label={t('returns.returnDriver')} value={s.returnInfo.returnDriver.fullName} />
           ) : null}
@@ -304,6 +316,7 @@ function TransitionAction({
         shipment={shipment}
         loading={transition.isPending}
         error={transition.error}
+        onEdit={() => transition.reset()}
         onCancel={() => setOpen(false)}
         onSubmit={(cod) => transition.mutate({ toStatus: rule.to, cod }, { onSuccess: finish })}
       />
@@ -318,7 +331,10 @@ function TransitionAction({
           label={t('shipments.actions.reason')}
           placeholder={t('shipments.actions.reasonPlaceholder')}
           value={reason}
-          onChangeText={setReason}
+          onChangeText={(value) => {
+            setReason(value);
+            transition.reset();
+          }}
           multiline
           error={reasonError}
           testID={`reason-${rule.to}`}
@@ -345,16 +361,19 @@ function TransitionAction({
  * Delivery confirmation. Cash collection is never assumed: the driver answers explicitly,
  * types the amount, and confirms the hand-over. The API re-validates everything.
  */
-function DeliverPanel({
+export function DeliverPanel({
   shipment,
   loading,
   error,
   onSubmit,
+  onEdit,
   onCancel,
 }: {
   shipment: ShipmentDetails;
   loading: boolean;
   error: unknown;
+  /** Any answer changed: the previous attempt's error no longer applies. */
+  onEdit: () => void;
   onSubmit: (cod: {
     collected: boolean;
     amount: string;
@@ -370,6 +389,12 @@ function DeliverPanel({
   const [amount, setAmount] = useState('');
   const [partialReason, setPartialReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
+  const edit =
+    <V,>(set: (value: V) => void) =>
+    (value: V) => {
+      set(value);
+      onEdit();
+    };
   const expected = formatMoney(shipment.codAmount, language);
   // Exact comparison in cents (never floating point); the server re-validates everything.
   const typed = toCents(amount);
@@ -393,13 +418,13 @@ function DeliverPanel({
             <Choice
               label={t('shipments.deliver.collectedYes')}
               selected={collected === true}
-              onPress={() => setCollected(true)}
+              onPress={() => edit(setCollected)(true)}
               testID="cod-yes"
             />
             <Choice
               label={t('shipments.deliver.collectedNo')}
               selected={collected === false}
-              onPress={() => setCollected(false)}
+              onPress={() => edit(setCollected)(false)}
               testID="cod-no"
             />
           </Row>
@@ -407,7 +432,7 @@ function DeliverPanel({
             <TextField
               label={t('shipments.deliver.amount')}
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={edit(setAmount)}
               keyboardType="decimal-pad"
               forceLtr
               testID="cod-amount"
@@ -419,7 +444,8 @@ function DeliverPanel({
               <TextField
                 label={t('finance.cod.partialReason')}
                 value={partialReason}
-                onChangeText={setPartialReason}
+                onChangeText={edit(setPartialReason)}
+                hint={partialReason.trim().length < 3 ? t('validation.reason.required') : undefined}
                 multiline
                 testID="cod-partial-reason"
               />
@@ -433,7 +459,7 @@ function DeliverPanel({
       <Choice
         label={t('shipments.deliver.confirmCheck')}
         selected={confirmed}
-        onPress={() => setConfirmed((value) => !value)}
+        onPress={() => edit(setConfirmed)(!confirmed)}
         checkbox
         testID="deliver-confirm-check"
       />
@@ -473,7 +499,9 @@ function Choice({
   return (
     <Pressable
       accessibilityRole={checkbox ? 'checkbox' : 'radio'}
-      accessibilityState={checkbox ? { checked: selected } : { selected }}
+      accessibilityLabel={label}
+      // aria-* (not accessibilityState) so the checked state also reaches the web build.
+      aria-checked={selected}
       onPress={onPress}
       style={[styles.choice, selected && styles.choiceSelected, checkbox && styles.checkbox]}
       testID={testID}
