@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { UserRole } from './roles.js';
 import type { Currency } from './shipments.js';
-import { moneySchema, optionalMoneySchema, toAsciiDigits } from './shipments.js';
+import { moneySchema, moneyToCents, optionalMoneySchema, toAsciiDigits } from './shipments.js';
 
 /*
  * Phase 3 pricing contracts: zones, pricing rules, quotes, snapshots and fee overrides.
@@ -17,6 +17,55 @@ export const PRICING_SOURCES = [
   'LEGACY',
 ] as const;
 export type PricingSource = (typeof PRICING_SOURCES)[number];
+
+/**
+ * What a returned shipment (never delivered) is charged, configured per pricing rule. A
+ * merchant-specific rule overrides a general one through the normal rule precedence.
+ * - RETURN_ONLY: the return fee only (the default, and the Phase 3 behaviour).
+ * - DELIVERY_PLUS_RETURN: the shipment's delivery fee plus the return fee.
+ * - REDUCED_ATTEMPT_PLUS_RETURN: the rule's failed-attempt fee plus the return fee.
+ * The delivery/attempt part applies only after at least one failed delivery attempt, once per
+ * shipment; a waiver waives the whole return charge.
+ */
+export const RETURN_FEE_POLICIES = [
+  'RETURN_ONLY',
+  'DELIVERY_PLUS_RETURN',
+  'REDUCED_ATTEMPT_PLUS_RETURN',
+] as const;
+export type ReturnFeePolicy = (typeof RETURN_FEE_POLICIES)[number];
+
+const returnPolicySchema = z.enum(RETURN_FEE_POLICIES, {
+  error: 'validation.pricing.returnPolicy',
+});
+
+/** The failed-attempt fee exists only for REDUCED_ATTEMPT_PLUS_RETURN and never exceeds the fee. */
+function checkAttemptFee(
+  rule: { deliveryFee: string; returnPolicy?: ReturnFeePolicy; attemptFee?: string },
+  ctx: z.RefinementCtx,
+) {
+  if (!rule.returnPolicy) return;
+  if (rule.returnPolicy === 'REDUCED_ATTEMPT_PLUS_RETURN') {
+    if (rule.attemptFee === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attemptFee'],
+        message: 'validation.pricing.attemptFeeRequired',
+      });
+    } else if (moneyToCents(rule.attemptFee) > moneyToCents(rule.deliveryFee)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attemptFee'],
+        message: 'validation.pricing.attemptFeeTooHigh',
+      });
+    }
+  } else if (rule.attemptFee !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['attemptFee'],
+      message: 'validation.pricing.attemptFeeNotAllowed',
+    });
+  }
+}
 
 /** Roles that manage the zone tree. */
 export const ZONE_MANAGER_ROLES = [
@@ -95,6 +144,9 @@ export const createPricingRuleSchema = z
     deliveryFee: moneySchema(MAX_RULE_FEE),
     /** Omit to leave the return fee unconfigured (RETURN_FEE_UNCONFIGURED on returns). */
     returnFee: optionalMoneySchema(MAX_RULE_FEE),
+    returnPolicy: returnPolicySchema.default('RETURN_ONLY'),
+    /** Required for (and only for) REDUCED_ATTEMPT_PLUS_RETURN; at most the delivery fee. */
+    attemptFee: optionalMoneySchema(MAX_RULE_FEE),
     priority: z.coerce.number().int().min(-1000).max(1000).default(0),
     effectiveFrom: optionalDate,
     effectiveTo: optionalDate,
@@ -127,17 +179,34 @@ export const createPricingRuleSchema = z
     if (rule.effectiveFrom && rule.effectiveTo && rule.effectiveTo <= rule.effectiveFrom) {
       ctx.addIssue({ code: 'custom', path: ['effectiveTo'], message: 'validation.date.order' });
     }
+    checkAttemptFee(rule, ctx);
   });
 export type CreatePricingRuleInput = z.infer<typeof createPricingRuleSchema>;
 
-/** A revision replaces the fees/priority/window; the route and merchant stay the same. */
-export const revisePricingRuleSchema = z.object({
-  deliveryFee: moneySchema(MAX_RULE_FEE),
-  returnFee: optionalMoneySchema(MAX_RULE_FEE),
-  priority: z.coerce.number().int().min(-1000).max(1000).default(0),
-  effectiveTo: optionalDate,
-  note: z.string().trim().max(500).optional(),
-});
+/**
+ * A revision replaces the fees/priority/window; the route and merchant stay the same. Omit
+ * `returnPolicy` to keep the current policy (and attempt fee) of the rule.
+ */
+export const revisePricingRuleSchema = z
+  .object({
+    deliveryFee: moneySchema(MAX_RULE_FEE),
+    returnFee: optionalMoneySchema(MAX_RULE_FEE),
+    returnPolicy: returnPolicySchema.optional(),
+    attemptFee: optionalMoneySchema(MAX_RULE_FEE),
+    priority: z.coerce.number().int().min(-1000).max(1000).default(0),
+    effectiveTo: optionalDate,
+    note: z.string().trim().max(500).optional(),
+  })
+  .superRefine((rule, ctx) => {
+    if (!rule.returnPolicy && rule.attemptFee !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['returnPolicy'],
+        message: 'validation.pricing.returnPolicy',
+      });
+    }
+    checkAttemptFee(rule, ctx);
+  });
 export type RevisePricingRuleInput = z.infer<typeof revisePricingRuleSchema>;
 
 /** A merchant quote is always priced from the merchant's approved pickup zone. */
@@ -286,6 +355,8 @@ export interface PricingRuleItem {
   isFallback: boolean;
   deliveryFee: string;
   returnFee: string | null;
+  returnPolicy: ReturnFeePolicy;
+  attemptFee: string | null;
   currency: Currency;
   priority: number;
   effectiveFrom: string;
@@ -307,6 +378,8 @@ export interface PricingQuote {
   baseFee: string;
   finalFee: string;
   returnFee: string | null;
+  returnPolicy: ReturnFeePolicy;
+  attemptFee: string | null;
   currency: Currency;
   quotedAt: string;
   expiresAt: string | null;
@@ -333,6 +406,8 @@ export interface ShipmentPricingInfo {
   baseFee: string | null;
   finalFee: string;
   returnFee: string | null;
+  returnPolicy: ReturnFeePolicy;
+  attemptFee: string | null;
   pricedAt: string;
   overrides: FeeOverrideItem[];
 }

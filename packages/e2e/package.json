@@ -1,0 +1,19 @@
+{
+  "name": "@coobra/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "node prepare-db.mjs && playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@coobra/database": "workspace:*"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "24.19.2",
+    "argon2": "0.45.1",
+    "typescript": "~6.0.3"
+  }
+}

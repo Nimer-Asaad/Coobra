@@ -16,6 +16,27 @@ export const FINANCE_VIEW_ROLES = [
   'ACCOUNTANT',
   'OWNER_VIEWER',
 ] as const satisfies readonly UserRole[];
+/**
+ * May register a driver's declared cash hand-over at the counter. The settlement stays
+ * SUBMITTED until an accountant counts the cash (CASH_COUNT_ROLES).
+ */
+export const SETTLEMENT_RECORDER_ROLES = [
+  'SUPER_ADMIN',
+  'ACCOUNTANT',
+  'OPERATIONS',
+] as const satisfies readonly UserRole[];
+/**
+ * Counting cash is the accountant's job: only an accountant confirms or rejects a driver
+ * settlement and records a cash discrepancy (shortage). Never the person who registered it.
+ */
+export const CASH_COUNT_ROLES = ['ACCOUNTANT'] as const satisfies readonly UserRole[];
+/** May see driver settlements (operations see what they registered and its outcome). */
+export const SETTLEMENT_VIEW_ROLES = [
+  'SUPER_ADMIN',
+  'ACCOUNTANT',
+  'OWNER_VIEWER',
+  'OPERATIONS',
+] as const satisfies readonly UserRole[];
 /** May propose how a recipient shortfall is resolved (approval is a separate person). */
 export const SHORTFALL_PROPOSER_ROLES = [
   'SUPER_ADMIN',
@@ -245,10 +266,12 @@ export interface SettlementItem {
   status: 'SUBMITTED' | 'CONFIRMED' | 'REJECTED';
   declaredAmount: string;
   countedAmount: string | null;
+  /** Declared minus counted once confirmed (what stayed in the driver's custody). */
+  discrepancy: string | null;
   channel: CashChannel;
   note: string | null;
-  submittedBy: PersonRef;
-  decidedBy: PersonRef | null;
+  submittedBy: PersonRef & { role: UserRole };
+  decidedBy: (PersonRef & { role: UserRole }) | null;
   decidedAt: string | null;
   decisionNote: string | null;
   clearings: { shipment: { id: string; trackingNumber: string }; amount: string }[];

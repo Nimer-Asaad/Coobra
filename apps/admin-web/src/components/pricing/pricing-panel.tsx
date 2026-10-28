@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import {
   adminQuoteRequestSchema,
   createPricingRuleSchema,
+  RETURN_FEE_POLICIES,
   revisePricingRuleSchema,
   type AdminQuoteRequestInput,
   type CreatePricingRuleInput,
@@ -13,6 +14,7 @@ import {
   type PickupZoneRequestItem,
   type PricingQuote,
   type PricingRuleItem,
+  type ReturnFeePolicy,
   type RevisePricingRuleInput,
 } from '@coobra/shared';
 import { translateValidation } from '@coobra/i18n';
@@ -97,6 +99,68 @@ export function PricingPanel({
   );
 }
 
+/**
+ * Return charge policy with its failed-attempt fee (shown only for the policy that uses it).
+ * Submitted as `returnPolicy` and `attemptFee`.
+ */
+export function ReturnPolicyFields({
+  idPrefix,
+  defaultPolicy = 'RETURN_ONLY',
+  defaultAttemptFee,
+  errors,
+}: {
+  idPrefix: string;
+  defaultPolicy?: ReturnFeePolicy;
+  defaultAttemptFee?: string | null;
+  errors: Record<string, string | undefined>;
+}) {
+  const { t } = useTranslation();
+  const [policy, setPolicy] = useState<ReturnFeePolicy>(defaultPolicy);
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={`${idPrefix}-return-policy`}>{t('pricing.returnPolicy')}</Label>
+        <NativeSelect
+          id={`${idPrefix}-return-policy`}
+          name="returnPolicy"
+          value={policy}
+          onChange={(event) => setPolicy(event.target.value as ReturnFeePolicy)}
+        >
+          {RETURN_FEE_POLICIES.map((value) => (
+            <option key={value} value={value}>
+              {t(`pricing.returnPolicies.${value}`)}
+            </option>
+          ))}
+        </NativeSelect>
+        <p className="text-xs text-muted-foreground">{t('pricing.returnPolicyHint')}</p>
+        {errors.returnPolicy ? (
+          <p className="text-sm text-destructive">{translateValidation(t, errors.returnPolicy)}</p>
+        ) : null}
+      </div>
+      {policy === 'REDUCED_ATTEMPT_PLUS_RETURN' ? (
+        <FormField
+          name="attemptFee"
+          dir="ltr"
+          inputMode="decimal"
+          defaultValue={defaultAttemptFee ?? ''}
+          label={t('pricing.attemptFee')}
+          hint={t('pricing.attemptFeeHint')}
+          error={errors.attemptFee}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** Reads the policy fields; the attempt fee is sent only with the policy that uses it. */
+function policyValues(form: FormData) {
+  const returnPolicy = String(form.get('returnPolicy') ?? 'RETURN_ONLY');
+  return {
+    returnPolicy,
+    attemptFee: returnPolicy === 'REDUCED_ATTEMPT_PLUS_RETURN' ? form.get('attemptFee') : undefined,
+  };
+}
+
 function RuleRow({ rule, canManage }: { rule: PricingRuleItem; canManage: boolean }) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
@@ -146,6 +210,10 @@ function RuleRow({ rule, canManage }: { rule: PricingRuleItem; canManage: boolea
             {t('pricing.returnFeeShort')}:{' '}
             {rule.returnFee ? formatMoney(rule.returnFee, lang) : t('pricing.returnFeeUnset')}
           </p>
+          <p className="text-muted-foreground">
+            {t(`pricing.returnPolicies.${rule.returnPolicy}`)}
+            {rule.attemptFee ? ` · ${formatMoney(rule.attemptFee, lang)}` : ''}
+          </p>
         </div>
       </div>
       {canManage && rule.active ? (
@@ -174,6 +242,7 @@ function RuleRow({ rule, canManage }: { rule: PricingRuleItem; canManage: boolea
             const values = validate(revisePricingRuleSchema, {
               deliveryFee: form.get('deliveryFee'),
               returnFee: form.get('returnFee'),
+              ...policyValues(form),
               priority: form.get('priority') || 0,
             });
             if (values) revise.mutate(values);
@@ -201,6 +270,14 @@ function RuleRow({ rule, canManage }: { rule: PricingRuleItem; canManage: boolea
             defaultValue={rule.priority}
             label={t('pricing.priority')}
           />
+          <div className="flex flex-col gap-2 sm:col-span-3">
+            <ReturnPolicyFields
+              idPrefix={`revise-${rule.id}`}
+              defaultPolicy={rule.returnPolicy}
+              defaultAttemptFee={rule.attemptFee}
+              errors={fieldErrors}
+            />
+          </div>
           <div className="sm:col-span-3">
             <ErrorAlert error={revise.error} />
             <Button type="submit" size="sm" disabled={revise.isPending}>
@@ -219,6 +296,8 @@ function CreateRuleForm() {
   const formRef = useRef<HTMLFormElement>(null);
   const merchants = useMerchants();
   const [fallback, setFallback] = useState(false);
+  // Remounts the policy fields after a successful create (form.reset() misses React state).
+  const [formKey, setFormKey] = useState(0);
   const { fieldErrors, validate, applyApiError } = useFormErrors();
   const create = useMutation({
     mutationFn: (body: CreatePricingRuleInput) =>
@@ -226,6 +305,7 @@ function CreateRuleForm() {
     onSuccess: () => {
       formRef.current?.reset();
       setFallback(false);
+      setFormKey((key) => key + 1);
       void queryClient.invalidateQueries({ queryKey: RULES_KEY });
     },
     onError: applyApiError,
@@ -256,6 +336,7 @@ function CreateRuleForm() {
               destinationZoneId: fallback ? undefined : get('destinationZoneId'),
               deliveryFee: form.get('deliveryFee'),
               returnFee: form.get('returnFee'),
+              ...policyValues(form),
               priority: form.get('priority') || 0,
               note: get('note'),
             });
@@ -316,6 +397,7 @@ function CreateRuleForm() {
             hint={t('pricing.returnFeeHint')}
             error={fieldErrors.returnFee}
           />
+          <ReturnPolicyFields key={formKey} idPrefix="rule" errors={fieldErrors} />
           <FormField name="priority" type="number" defaultValue={0} label={t('pricing.priority')} />
           <FormField name="note" label={t('pricing.note')} />
           {fieldError('isFallback')}

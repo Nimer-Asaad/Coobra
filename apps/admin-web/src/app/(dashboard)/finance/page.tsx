@@ -5,7 +5,10 @@ import { Alert } from '@/components/ui/alert';
 import { getCurrentSession } from '@/lib/api-server';
 import { getServerT } from '@/lib/i18n-server';
 
-/** Finance roles see everything; OPERATIONS only the shortfall reviews. The API enforces it. */
+/**
+ * Finance roles see everything; OPERATIONS register driver cash hand-overs and propose shortfall
+ * resolutions. The API enforces it.
+ */
 export default async function FinancePage() {
   const session = await getCurrentSession();
   if (!session) redirect('/login');
@@ -14,5 +17,5 @@ export default async function FinancePage() {
     const { t } = await getServerT();
     return <Alert variant="destructive">{t('errors.FORBIDDEN')}</Alert>;
   }
-  return <FinancePanel role={role} />;
+  return <FinancePanel role={role} userId={session.user.id} />;
 }

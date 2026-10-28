@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { Prisma, type CashChannel } from '@coobra/database';
-import type {
-  ConfirmSettlementInput,
-  DriverBalanceRow,
-  DriverFinanceSummary,
-  DriverRepaymentInput,
-  DriverShortageInput,
-  DriverShortageItem,
-  SettlementItem,
-  UnclearedCollection,
-  UserRole,
+import {
+  CASH_COUNT_ROLES,
+  type ConfirmSettlementInput,
+  type DriverBalanceRow,
+  type DriverFinanceSummary,
+  type DriverRepaymentInput,
+  type DriverShortageInput,
+  type DriverShortageItem,
+  type SettlementItem,
+  type UnclearedCollection,
+  type UserRole,
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
 import { Errors } from '../common/app-exception.js';
@@ -42,8 +43,8 @@ interface Allocation {
 
 const settlementInclude = {
   driver: { select: { id: true, fullName: true } },
-  submittedBy: { select: { id: true, fullName: true } },
-  decidedBy: { select: { id: true, fullName: true } },
+  submittedBy: { select: { id: true, fullName: true, role: true } },
+  decidedBy: { select: { id: true, fullName: true, role: true } },
   clearings: {
     include: {
       collection: { select: { shipment: { select: { id: true, trackingNumber: true } } } },
@@ -60,6 +61,7 @@ function toSettlementItem(
     status: row.status,
     declaredAmount: money(row.declaredAmount),
     countedAmount: row.countedAmount ? money(row.countedAmount) : null,
+    discrepancy: row.countedAmount ? money(row.declaredAmount.minus(row.countedAmount)) : null,
     channel: row.channel,
     note: row.note,
     submittedBy: row.submittedBy,
@@ -111,6 +113,20 @@ export class SettlementsService {
     private readonly idempotency: IdempotencyService,
     private readonly audit: AuditService,
   ) {}
+
+  /**
+   * Accountant-only cash decisions, never by the driver or by whoever registered the
+   * hand-over. The routes allow only CASH_COUNT_ROLES; this repeats it for every caller.
+   */
+  private assertCanDecideSettlement(
+    actor: Actor,
+    settlement: { driverId: string; submittedById: string },
+  ) {
+    if (!(CASH_COUNT_ROLES as readonly UserRole[]).includes(actor.role)) throw Errors.forbidden();
+    if (settlement.driverId === actor.id || settlement.submittedById === actor.id) {
+      throw Errors.selfApprovalForbidden();
+    }
+  }
 
   private async assertDriver(db: Tx, driverId: string) {
     if (!UUID_PATTERN.test(driverId)) throw Errors.shipmentDriverInvalid();
@@ -239,7 +255,11 @@ export class SettlementsService {
         actorUserId: actor.id,
         targetUserId: driverId,
         meta,
-        metadata: { settlementId: settlement.id, declaredAmount: input.declaredAmount },
+        metadata: {
+          settlementId: settlement.id,
+          declaredAmount: money(decimal(input.declaredAmount)),
+          submittedByRole: actor.role,
+        },
       });
       return toSettlementItem(settlement);
     });
@@ -256,7 +276,7 @@ export class SettlementsService {
         const current = await tx.driverSettlement.findUniqueOrThrow({ where: { id } });
         if (current.status !== 'SUBMITTED')
           throw Errors.invalidState('This settlement was already decided');
-        if (current.driverId === actor.id) throw Errors.selfApprovalForbidden();
+        this.assertCanDecideSettlement(actor, current);
         const counted = decimal(input.countedAmount);
         if (!counted.greaterThan(0) || counted.greaterThan(current.declaredAmount)) {
           throw Errors.validation({ countedAmount: 'validation.finance.counted' });
@@ -302,9 +322,13 @@ export class SettlementsService {
         meta,
         metadata: {
           settlementId: id,
+          submittedById: settlement.submittedById,
           declaredAmount: money(settlement.declaredAmount),
-          countedAmount: input.countedAmount,
+          countedAmount: money(decimal(input.countedAmount)),
+          discrepancy: money(settlement.declaredAmount.minus(decimal(input.countedAmount))),
           channel: input.channel,
+          submittedAt: settlement.createdAt.toISOString(),
+          decidedAt: settlement.decidedAt?.toISOString() ?? null,
         },
       });
       return toSettlementItem(settlement);
@@ -321,6 +345,7 @@ export class SettlementsService {
       const current = await tx.driverSettlement.findUniqueOrThrow({ where: { id } });
       if (current.status !== 'SUBMITTED')
         throw Errors.invalidState('This settlement was already decided');
+      this.assertCanDecideSettlement(actor, current);
       return tx.driverSettlement.update({
         where: { id },
         data: {
@@ -337,7 +362,12 @@ export class SettlementsService {
       actorUserId: actor.id,
       targetUserId: settlement.driverId,
       meta,
-      metadata: { settlementId: id, note },
+      metadata: {
+        settlementId: id,
+        submittedById: settlement.submittedById,
+        declaredAmount: money(settlement.declaredAmount),
+        note,
+      },
     });
     return toSettlementItem(settlement);
   }
@@ -362,7 +392,9 @@ export class SettlementsService {
   // Driver cash shortages and repayments
   // ---------------------------------------------------------------------------
 
+  /** An accountant records a counted cash discrepancy; a second finance user approves it. */
   async proposeShortage(actor: Actor, input: DriverShortageInput, meta: RequestMeta) {
+    if (!(CASH_COUNT_ROLES as readonly UserRole[]).includes(actor.role)) throw Errors.forbidden();
     const db = this.prisma.client;
     await this.assertDriver(db, input.driverId);
     if (decimal(input.amount).greaterThan(await this.uncleared(db, input.driverId))) {

@@ -281,6 +281,9 @@ export class ShipmentsService {
               baseFee: priced?.fee ?? null,
               finalFee: fee,
               returnFee: priced?.returnFee ?? null,
+              // No rule applied: nothing beyond the return fee can be charged.
+              returnPolicy: priced?.returnPolicy ?? 'RETURN_ONLY',
+              attemptFee: priced?.attemptFee ?? null,
               pricedById: creator.id,
             },
           });

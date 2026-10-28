@@ -6,11 +6,14 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CASH_CHANNELS,
+  CASH_COUNT_ROLES,
   PAYMENT_METHODS,
   PROPOSABLE_SHORTFALL_RESOLUTIONS,
+  SETTLEMENT_RECORDER_ROLES,
   type AdjustmentItem,
   type CodShortfallItem,
   type DriverBalanceRow,
+  type DriverOption,
   type DriverShortageItem,
   type FinanceOverview,
   type FinanceSettingItem,
@@ -44,11 +47,18 @@ function useBffPost(path: string, withKey = true) {
 }
 const optional = (form: FormData, key: string) => text(form, key) || undefined;
 
-export function FinancePanel({ role }: { role: UserRole }) {
+const hasRole = (roles: readonly UserRole[], role: UserRole) => roles.includes(role);
+
+export function FinancePanel({ role, userId }: { role: UserRole; userId: string }) {
   const { t } = useTranslation();
   const isFinance = role === 'SUPER_ADMIN' || role === 'ACCOUNTANT';
   const canView = isFinance || role === 'OWNER_VIEWER';
-  const tabs: Tab[] = canView ? ['overview', 'drivers', 'merchants', 'reviews'] : ['reviews'];
+  // Operations register cash hand-overs (no balances); finance sees everything.
+  const tabs: Tab[] = canView
+    ? ['overview', 'drivers', 'merchants', 'reviews']
+    : role === 'OPERATIONS'
+      ? ['drivers', 'reviews']
+      : ['reviews'];
   const [tab, setTab] = useState<Tab>(tabs[0] ?? 'reviews');
 
   return (
@@ -73,7 +83,15 @@ export function FinancePanel({ role }: { role: UserRole }) {
         </div>
       </div>
       {tab === 'overview' ? <OverviewTab isSuperAdmin={role === 'SUPER_ADMIN'} /> : null}
-      {tab === 'drivers' ? <DriversTab canManage={isFinance} /> : null}
+      {tab === 'drivers' ? (
+        <DriversTab
+          canSeeMoney={canView}
+          canManage={isFinance}
+          canRecord={hasRole(SETTLEMENT_RECORDER_ROLES, role)}
+          canCount={hasRole(CASH_COUNT_ROLES, role)}
+          userId={userId}
+        />
+      ) : null}
       {tab === 'merchants' ? <MerchantsTab canManage={isFinance} /> : null}
       {tab === 'reviews' ? (
         <ReviewsTab
@@ -356,11 +374,34 @@ function ChannelSelect({ name = 'channel', label }: { name?: string; label: stri
   );
 }
 
-function DriversTab({ canManage }: { canManage: boolean }) {
+/**
+ * Driver cash. Operations and finance register hand-overs; only an accountant (never the one
+ * who registered it) counts and confirms or rejects them, and records cash discrepancies.
+ */
+function DriversTab({
+  canSeeMoney,
+  canManage,
+  canRecord,
+  canCount,
+  userId,
+}: {
+  canSeeMoney: boolean;
+  canManage: boolean;
+  canRecord: boolean;
+  canCount: boolean;
+  userId: string;
+}) {
   const { t, i18n } = useTranslation();
   const drivers = useQuery({
     queryKey: [...FIN, 'drivers'],
     queryFn: () => bff<DriverBalanceRow[]>('/v1/admin/finance/drivers'),
+    enabled: canSeeMoney,
+  });
+  // Without balance access (operations) the driver list comes from the shipments directory.
+  const driverOptions = useQuery({
+    queryKey: ['admin', 'drivers', ''],
+    queryFn: () => bff<DriverOption[]>('/v1/admin/drivers'),
+    enabled: !canSeeMoney && canRecord,
   });
   const settlements = useQuery({
     queryKey: [...FIN, 'settlements'],
@@ -369,7 +410,11 @@ function DriversTab({ canManage }: { canManage: boolean }) {
   const shortages = useQuery({
     queryKey: [...FIN, 'driver-shortages'],
     queryFn: () => bff<DriverShortageItem[]>('/v1/admin/finance/driver-shortages'),
+    enabled: canSeeMoney,
   });
+  const people = canSeeMoney
+    ? (drivers.data?.map((row) => row.driver) ?? [])
+    : (driverOptions.data ?? []);
   const record = useBffPost('/v1/admin/finance/settlements');
   const propose = useBffPost('/v1/admin/finance/driver-shortages', false);
   const repay = useBffPost('/v1/admin/finance/driver-repayments');
@@ -382,9 +427,9 @@ function DriversTab({ canManage }: { canManage: boolean }) {
       <option value="" disabled>
         {t('finance.chooseDriver')}
       </option>
-      {drivers.data?.map((row) => (
-        <option key={row.driver.id} value={row.driver.id}>
-          {row.driver.fullName}
+      {people.map((driver) => (
+        <option key={driver.id} value={driver.id}>
+          {driver.fullName}
         </option>
       ))}
     </NativeSelect>
@@ -393,40 +438,44 @@ function DriversTab({ canManage }: { canManage: boolean }) {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
       <div className="flex flex-col gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('finance.tabs.drivers')}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {drivers.isError ? <ErrorAlert error={drivers.error} /> : null}
-            <table className="w-full text-sm">
-              <thead className="text-muted-foreground">
-                <tr>
-                  <th className="py-1 text-start font-medium">{t('finance.driver')}</th>
-                  <th className="py-1 text-start font-medium">{t('finance.custody')}</th>
-                  <th className="py-1 text-start font-medium">{t('finance.receivable')}</th>
-                  <th className="py-1 text-start font-medium">{t('finance.pendingSettlement')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {drivers.data?.map((row) => (
-                  <tr key={row.driver.id}>
-                    <td className="py-1.5">{row.driver.fullName}</td>
-                    <td>
-                      <Amount value={row.custody} />
-                    </td>
-                    <td>
-                      <Amount value={row.receivable} />
-                    </td>
-                    <td>
-                      <Amount value={row.pendingSettlement} />
-                    </td>
+        {canSeeMoney ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('finance.tabs.drivers')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {drivers.isError ? <ErrorAlert error={drivers.error} /> : null}
+              <table className="w-full text-sm">
+                <thead className="text-muted-foreground">
+                  <tr>
+                    <th className="py-1 text-start font-medium">{t('finance.driver')}</th>
+                    <th className="py-1 text-start font-medium">{t('finance.custody')}</th>
+                    <th className="py-1 text-start font-medium">{t('finance.receivable')}</th>
+                    <th className="py-1 text-start font-medium">
+                      {t('finance.pendingSettlement')}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+                </thead>
+                <tbody className="divide-y">
+                  {drivers.data?.map((row) => (
+                    <tr key={row.driver.id}>
+                      <td className="py-1.5">{row.driver.fullName}</td>
+                      <td>
+                        <Amount value={row.custody} />
+                      </td>
+                      <td>
+                        <Amount value={row.receivable} />
+                      </td>
+                      <td>
+                        <Amount value={row.pendingSettlement} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>
@@ -439,138 +488,162 @@ function DriversTab({ canManage }: { canManage: boolean }) {
             ) : null}
             <ul className="divide-y">
               {settlements.data?.map((settlement) => (
-                <SettlementRow key={settlement.id} settlement={settlement} canManage={canManage} />
+                <SettlementRow
+                  key={settlement.id}
+                  settlement={settlement}
+                  canCount={canCount}
+                  userId={userId}
+                />
               ))}
             </ul>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('finance.shortages')}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {shortages.data?.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t('finance.empty')}</p>
-            ) : null}
-            <ul className="divide-y">
-              {shortages.data?.map((shortage) => (
-                <li key={shortage.id} className="flex flex-col gap-2 py-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-medium">
-                      {shortage.driver.fullName} · <Amount value={shortage.amount} /> ·{' '}
-                      {t(`finance.responsibility.${shortage.responsibility}`)}
-                    </span>
-                    <StatusPill
-                      tone={
-                        shortage.status === 'PENDING_APPROVAL'
-                          ? 'warn'
-                          : shortage.status === 'APPLIED'
-                            ? 'ok'
-                            : 'muted'
-                      }
-                    >
-                      {t(`finance.approvalStatus.${shortage.status}`)}
-                    </StatusPill>
-                  </div>
-                  <p className="text-muted-foreground">
-                    {shortage.reason} ·{' '}
-                    {t('finance.proposedBy', { name: shortage.proposedBy.fullName })} ·{' '}
-                    {formatDateTime(shortage.createdAt, i18n.language)}
-                  </p>
-                  {canManage && shortage.status === 'PENDING_APPROVAL' ? (
-                    <DecisionButtons path={`/v1/admin/finance/driver-shortages/${shortage.id}`} />
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        {canSeeMoney ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('finance.shortages')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {shortages.data?.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{t('finance.empty')}</p>
+              ) : null}
+              <ul className="divide-y">
+                {shortages.data?.map((shortage) => (
+                  <li key={shortage.id} className="flex flex-col gap-2 py-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium">
+                        {shortage.driver.fullName} · <Amount value={shortage.amount} /> ·{' '}
+                        {t(`finance.responsibility.${shortage.responsibility}`)}
+                      </span>
+                      <StatusPill
+                        tone={
+                          shortage.status === 'PENDING_APPROVAL'
+                            ? 'warn'
+                            : shortage.status === 'APPLIED'
+                              ? 'ok'
+                              : 'muted'
+                        }
+                      >
+                        {t(`finance.approvalStatus.${shortage.status}`)}
+                      </StatusPill>
+                    </div>
+                    <p className="text-muted-foreground">
+                      {shortage.reason} ·{' '}
+                      {t('finance.proposedBy', { name: shortage.proposedBy.fullName })} ·{' '}
+                      {formatDateTime(shortage.createdAt, i18n.language)}
+                    </p>
+                    {canManage && shortage.status === 'PENDING_APPROVAL' ? (
+                      <DecisionButtons path={`/v1/admin/finance/driver-shortages/${shortage.id}`} />
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
-      {canManage ? (
+      {canRecord || canManage ? (
         <div className="flex flex-col gap-3">
-          <InlineAction
-            label={t('finance.recordSettlement')}
-            pending={record.isPending}
-            error={record.error}
-            onSubmit={(form) =>
-              record.mutateAsync({
-                driverId: text(form, 'driverId'),
-                declaredAmount: text(form, 'amount'),
-                note: optional(form, 'note'),
-              })
-            }
-          >
-            {driverSelect}
-            {recordError('driverId')}
-            <FormField name="amount" dir="ltr" inputMode="decimal" label={t('finance.declared')} />
-            {recordError('declaredAmount')}
-            <FormField name="note" label={t('finance.note')} />
-          </InlineAction>
-          <InlineAction
-            label={t('finance.proposeShortage')}
-            pending={propose.isPending}
-            error={propose.error}
-            onSubmit={(form) =>
-              propose.mutateAsync({
-                driverId: text(form, 'driverId'),
-                amount: text(form, 'amount'),
-                responsibility: text(form, 'responsibility'),
-                reason: text(form, 'reason'),
-              })
-            }
-          >
-            {driverSelect}
-            <FormField name="amount" dir="ltr" inputMode="decimal" label={t('finance.amount')} />
-            {proposeError('amount')}
-            <NativeSelect
-              name="responsibility"
-              defaultValue="DRIVER_LIABLE"
-              aria-label={t('finance.whoBears')}
+          {canRecord ? (
+            <InlineAction
+              label={t('finance.recordSettlement')}
+              successMessage={t('finance.settlementRecorded')}
+              pending={record.isPending}
+              error={record.error}
+              onSubmit={(form) =>
+                record.mutateAsync({
+                  driverId: text(form, 'driverId'),
+                  declaredAmount: text(form, 'amount'),
+                  note: optional(form, 'note'),
+                })
+              }
             >
-              <option value="DRIVER_LIABLE">{t('finance.responsibility.DRIVER_LIABLE')}</option>
-              <option value="COMPANY_ABSORBS">{t('finance.responsibility.COMPANY_ABSORBS')}</option>
-            </NativeSelect>
-            <FormField name="reason" label={t('finance.reason')} />
-            {proposeError('reason')}
-          </InlineAction>
-          <InlineAction
-            label={t('finance.repayment')}
-            pending={repay.isPending}
-            error={repay.error}
-            onSubmit={(form) =>
-              repay.mutateAsync({
-                driverId: text(form, 'driverId'),
-                amount: text(form, 'amount'),
-                channel: text(form, 'channel'),
-                note: optional(form, 'note'),
-              })
-            }
-          >
-            {driverSelect}
-            <FormField name="amount" dir="ltr" inputMode="decimal" label={t('finance.amount')} />
-            {repayError('amount')}
-            <ChannelSelect label={t('finance.channel')} />
-            <FormField name="note" label={t('finance.note')} />
-          </InlineAction>
+              {driverSelect}
+              {recordError('driverId')}
+              <FormField
+                name="amount"
+                dir="ltr"
+                inputMode="decimal"
+                label={t('finance.declared')}
+              />
+              {recordError('declaredAmount')}
+              <FormField name="note" label={t('finance.note')} />
+            </InlineAction>
+          ) : null}
+          {canCount ? (
+            <InlineAction
+              label={t('finance.proposeShortage')}
+              pending={propose.isPending}
+              error={propose.error}
+              onSubmit={(form) =>
+                propose.mutateAsync({
+                  driverId: text(form, 'driverId'),
+                  amount: text(form, 'amount'),
+                  responsibility: text(form, 'responsibility'),
+                  reason: text(form, 'reason'),
+                })
+              }
+            >
+              {driverSelect}
+              <FormField name="amount" dir="ltr" inputMode="decimal" label={t('finance.amount')} />
+              {proposeError('amount')}
+              <NativeSelect
+                name="responsibility"
+                defaultValue="DRIVER_LIABLE"
+                aria-label={t('finance.whoBears')}
+              >
+                <option value="DRIVER_LIABLE">{t('finance.responsibility.DRIVER_LIABLE')}</option>
+                <option value="COMPANY_ABSORBS">
+                  {t('finance.responsibility.COMPANY_ABSORBS')}
+                </option>
+              </NativeSelect>
+              <FormField name="reason" label={t('finance.reason')} />
+              {proposeError('reason')}
+            </InlineAction>
+          ) : null}
+          {canManage ? (
+            <InlineAction
+              label={t('finance.repayment')}
+              pending={repay.isPending}
+              error={repay.error}
+              onSubmit={(form) =>
+                repay.mutateAsync({
+                  driverId: text(form, 'driverId'),
+                  amount: text(form, 'amount'),
+                  channel: text(form, 'channel'),
+                  note: optional(form, 'note'),
+                })
+              }
+            >
+              {driverSelect}
+              <FormField name="amount" dir="ltr" inputMode="decimal" label={t('finance.amount')} />
+              {repayError('amount')}
+              <ChannelSelect label={t('finance.channel')} />
+              <FormField name="note" label={t('finance.note')} />
+            </InlineAction>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-function SettlementRow({
+export function SettlementRow({
   settlement,
-  canManage,
+  canCount,
+  userId,
 }: {
   settlement: SettlementItem;
-  canManage: boolean;
+  canCount: boolean;
+  userId: string;
 }) {
   const { t, i18n } = useTranslation();
   const confirm = useBffPost(`/v1/admin/finance/settlements/${settlement.id}/confirm`);
   const reject = useBffPost(`/v1/admin/finance/settlements/${settlement.id}/reject`, false);
   const fieldError = useFieldError(confirm.error);
+  const registeredByMe = settlement.submittedBy.id === userId;
   return (
     <li className="flex flex-col gap-2 py-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -581,6 +654,12 @@ function SettlementRow({
             <>
               {' · '}
               {t('finance.counted')} <Amount value={settlement.countedAmount} />
+            </>
+          ) : null}
+          {settlement.discrepancy && settlement.discrepancy !== '0.00' ? (
+            <>
+              {' · '}
+              {t('finance.discrepancy')} <Amount value={settlement.discrepancy} />
             </>
           ) : null}
         </span>
@@ -604,7 +683,10 @@ function SettlementRow({
           : ''}
         {settlement.decisionNote ? ` · ${settlement.decisionNote}` : ''}
       </p>
-      {canManage && settlement.status === 'SUBMITTED' ? (
+      {canCount && settlement.status === 'SUBMITTED' && registeredByMe ? (
+        <p className="text-muted-foreground">{t('finance.countByAnotherAccountant')}</p>
+      ) : null}
+      {canCount && settlement.status === 'SUBMITTED' && !registeredByMe ? (
         <div className="flex flex-wrap gap-2">
           <InlineAction
             label={t('finance.confirm')}

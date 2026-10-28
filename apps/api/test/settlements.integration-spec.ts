@@ -20,6 +20,7 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
   let admin: TestUser;
   let ops: TestUser;
   let accountant: TestUser;
+  let accountant2: TestUser;
   let viewer: TestUser;
   let merchantA: TestUser;
   let merchantB: TestUser;
@@ -45,6 +46,7 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
     admin = await createSignedInUser(ctx, 'SUPER_ADMIN', 'admin@example.com');
     ops = await createSignedInUser(ctx, 'OPERATIONS', 'ops@example.com');
     accountant = await createSignedInUser(ctx, 'ACCOUNTANT', 'acc@example.com');
+    accountant2 = await createSignedInUser(ctx, 'ACCOUNTANT', 'acc2@example.com');
     viewer = await createSignedInUser(ctx, 'OWNER_VIEWER', 'owner@example.com');
     merchantA = await createSignedInUser(ctx, 'MERCHANT', 'a@example.com');
     merchantB = await createSignedInUser(ctx, 'MERCHANT', 'b@example.com');
@@ -172,6 +174,14 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
       .expect(403);
     await confirm(settlement.id, { countedAmount: '200' }, ops).expect(403);
     await confirm(settlement.id, { countedAmount: '200' }, viewer).expect(403);
+    // SUPER_ADMIN monitors but does not count cash: no bypass through the normal endpoints.
+    await confirm(settlement.id, { countedAmount: '200' }, admin).expect(403);
+    await api(admin)
+      .post(`/v1/admin/finance/settlements/${settlement.id}/reject`, { note: 'No' })
+      .expect(403);
+    await api(merchantA)
+      .post(`/v1/admin/finance/settlements/${settlement.id}/reject`, { note: 'No' })
+      .expect(403);
     expect(
       (
         await api(accountant)
@@ -181,9 +191,10 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
     ).toBe('IDEMPOTENCY_KEY_REQUIRED');
 
     const key = newKey();
+    // Two accountants count the same hand-over at once: exactly one confirmation wins.
     const [a, b] = await Promise.all([
       confirm(settlement.id, { countedAmount: '200' }, accountant, key),
-      confirm(settlement.id, { countedAmount: '200' }, admin),
+      confirm(settlement.id, { countedAmount: '200' }, accountant2),
     ]);
     expect([a.status, b.status].sort()).toEqual([200, 409]);
     // Replaying the accountant's request returns its stored outcome, never a second posting.
@@ -199,30 +210,89 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
     expect((await submit('1').expect(422)).body.code).toBe('INSUFFICIENT_FUNDS');
   });
 
-  it('lets finance record a counter settlement and reject a wrong one', async () => {
+  const record = (user: TestUser, declaredAmount: string, note?: string) =>
+    api(user).post(
+      '/v1/admin/finance/settlements',
+      { driverId: driver.id, declaredAmount, ...(note ? { note } : {}) },
+      newKey(),
+    );
+
+  it('lets operations register a counter hand-over that only an accountant counts', async () => {
     await delivered(merchantA, '200');
-    await api(ops)
-      .post(
-        '/v1/admin/finance/settlements',
-        { driverId: driver.id, declaredAmount: '100' },
-        newKey(),
-      )
-      .expect(403);
-    const recorded = await api(accountant)
-      .post(
-        '/v1/admin/finance/settlements',
-        { driverId: driver.id, declaredAmount: '150', note: 'Counter' },
-        newKey(),
-      )
-      .expect(201);
-    expect(recorded.body.submittedBy.id).toBe(accountant.id);
-    await api(admin)
-      .post(`/v1/admin/finance/settlements/${recorded.body.id}/reject`, {})
-      .expect(400);
-    await api(admin)
-      .post(`/v1/admin/finance/settlements/${recorded.body.id}/reject`, { note: 'Wrong driver' })
-      .expect(200);
+    await record(viewer, '100').expect(403);
+    await record(merchantA, '100').expect(403);
+    await record(driver2, '100').expect(403);
+    const recorded = (await record(ops, '150', 'Counter').expect(201)).body as SettlementItem;
+    expect(recorded).toMatchObject({
+      status: 'SUBMITTED',
+      submittedBy: { id: ops.id, role: 'OPERATIONS' },
+      countedAmount: null,
+      discrepancy: null,
+    });
+    // Registering is not receiving cash: nothing moves until the accountant counts it.
     expect(await balance(`DRIVER_CUSTODY:${driver.id}`)).toBe('200.00');
+    expect(await balance('COMPANY_CASH_HUB')).toBe('0.00');
+    await confirm(recorded.id, { countedAmount: '150' }, ops).expect(403);
+    const listed = await api(ops).get('/v1/admin/finance/settlements').expect(200);
+    expect(listed.body.map((item: SettlementItem) => item.id)).toEqual([recorded.id]);
+    // Operations do not see custody balances.
+    await api(ops).get('/v1/admin/finance/drivers').expect(403);
+
+    // Counted 140 of 150: 140 is cleared, the 10 discrepancy stays in the driver's custody.
+    const confirmed = (await confirm(recorded.id, { countedAmount: '140' }).expect(200))
+      .body as SettlementItem;
+    expect(confirmed).toMatchObject({
+      status: 'CONFIRMED',
+      declaredAmount: '150.00',
+      countedAmount: '140.00',
+      discrepancy: '10.00',
+      submittedBy: { id: ops.id },
+      decidedBy: { id: accountant.id, role: 'ACCOUNTANT' },
+    });
+    expect(confirmed.decidedAt).toEqual(expect.any(String));
+    expect(await balance(`DRIVER_CUSTODY:${driver.id}`)).toBe('60.00');
+    expect(await balance('COMPANY_CASH_HUB')).toBe('140.00');
+    const audit = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'SETTLEMENT_CONFIRMED' },
+    });
+    expect(audit.actorUserId).toBe(accountant.id);
+    expect(audit.metadata).toMatchObject({
+      settlementId: recorded.id,
+      submittedById: ops.id,
+      declaredAmount: '150.00',
+      countedAmount: '140.00',
+      discrepancy: '10.00',
+    });
+    const submitted = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'SETTLEMENT_SUBMITTED' },
+    });
+    expect(submitted.metadata).toMatchObject({ submittedByRole: 'OPERATIONS' });
+  });
+
+  it('never lets an accountant decide a hand-over they registered', async () => {
+    await delivered(merchantA, '200');
+    const recorded = (await record(accountant, '150').expect(201)).body as SettlementItem;
+    expect(
+      (await confirm(recorded.id, { countedAmount: '150' }, accountant).expect(403)).body.code,
+    ).toBe('SELF_APPROVAL_FORBIDDEN');
+    expect(
+      (
+        await api(accountant)
+          .post(`/v1/admin/finance/settlements/${recorded.id}/reject`, { note: 'Mine' })
+          .expect(403)
+      ).body.code,
+    ).toBe('SELF_APPROVAL_FORBIDDEN');
+    await api(accountant2)
+      .post(`/v1/admin/finance/settlements/${recorded.id}/reject`, {})
+      .expect(400);
+    const rejected = await api(accountant2)
+      .post(`/v1/admin/finance/settlements/${recorded.id}/reject`, { note: 'Wrong driver' })
+      .expect(200);
+    expect(rejected.body).toMatchObject({ status: 'REJECTED', decidedBy: { id: accountant2.id } });
+    // Decided once: a later confirmation is refused and nothing is posted.
+    await confirm(recorded.id, { countedAmount: '150' }, accountant2).expect(409);
+    expect(await balance(`DRIVER_CUSTODY:${driver.id}`)).toBe('200.00');
+    expect(await ctx.prisma.journalEntry.count({ where: { kind: 'DRIVER_SETTLEMENT' } })).toBe(0);
     await submit('200').expect(201);
   });
 
@@ -248,6 +318,8 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
       reason: 'Lost 100 ILS',
     };
     await api(ops).post('/v1/admin/finance/driver-shortages', proposeBody).expect(403);
+    // Recording a cash discrepancy is the accountant's job, not the super admin's.
+    await api(admin).post('/v1/admin/finance/driver-shortages', proposeBody).expect(403);
     await api(accountant)
       .post('/v1/admin/finance/driver-shortages', { ...proposeBody, amount: '300' })
       .expect(422);
@@ -277,7 +349,7 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
     expect(await balance(`DRIVER_RECEIVABLE:${driver.id}`)).toBe('40.00');
     expect(await balance('COMPANY_CASH_HUB')).toBe('60.00');
 
-    const absorbed = await api(admin)
+    const absorbed = await api(accountant2)
       .post('/v1/admin/finance/driver-shortages', {
         driverId: driver.id,
         amount: '100',

@@ -7,7 +7,7 @@ import {
   quoteRequestSchema,
   revisePricingRuleSchema,
 } from './pricing.js';
-import { adminCreateShipmentSchema, createShipmentSchema } from './shipments.js';
+import { adminCreateShipmentSchema, createShipmentSchema, moneyToCents } from './shipments.js';
 import { toFieldErrors } from './validation.js';
 
 const zoneA = '0199a1c2-7d3e-7f00-8000-0000000000a1';
@@ -106,5 +106,63 @@ describe('zones and overrides', () => {
         destinationZoneId: zoneB,
       }).originZoneId,
     ).toBe(zoneA);
+  });
+});
+
+describe('return-fee policy on pricing rules', () => {
+  const route = { originZoneId: zoneA, destinationZoneId: zoneB, deliveryFee: '20' };
+  const errors = (
+    input: object,
+    schema:
+      | typeof createPricingRuleSchema
+      | typeof revisePricingRuleSchema = createPricingRuleSchema,
+  ) => {
+    const result = schema.safeParse(input);
+    return result.success ? {} : toFieldErrors(result.error);
+  };
+
+  it('defaults to RETURN_ONLY without an attempt fee', () => {
+    const rule = createPricingRuleSchema.parse(route);
+    expect(rule.returnPolicy).toBe('RETURN_ONLY');
+    expect(rule.attemptFee).toBeUndefined();
+  });
+
+  it('requires an attempt fee (at most the delivery fee) only for the reduced policy', () => {
+    const reduced = { ...route, returnPolicy: 'REDUCED_ATTEMPT_PLUS_RETURN' };
+    expect(errors(reduced)).toEqual({ attemptFee: 'validation.pricing.attemptFeeRequired' });
+    expect(errors({ ...reduced, attemptFee: '20.01' })).toEqual({
+      attemptFee: 'validation.pricing.attemptFeeTooHigh',
+    });
+    expect(createPricingRuleSchema.parse({ ...reduced, attemptFee: '٢٠' })).toMatchObject({
+      attemptFee: '20.00',
+    });
+    expect(errors({ ...route, returnPolicy: 'DELIVERY_PLUS_RETURN', attemptFee: '5' })).toEqual({
+      attemptFee: 'validation.pricing.attemptFeeNotAllowed',
+    });
+    expect(errors({ ...route, returnPolicy: 'FREE_RETURNS' })).toEqual({
+      returnPolicy: 'validation.pricing.returnPolicy',
+    });
+  });
+
+  it('keeps the policy on revision unless a new one is given', () => {
+    expect(revisePricingRuleSchema.parse({ deliveryFee: '20' }).returnPolicy).toBeUndefined();
+    expect(errors({ deliveryFee: '20', attemptFee: '5' }, revisePricingRuleSchema)).toEqual({
+      returnPolicy: 'validation.pricing.returnPolicy',
+    });
+    expect(
+      revisePricingRuleSchema.parse({
+        deliveryFee: '20',
+        returnPolicy: 'REDUCED_ATTEMPT_PLUS_RETURN',
+        attemptFee: '5',
+      }),
+    ).toMatchObject({ returnPolicy: 'REDUCED_ATTEMPT_PLUS_RETURN', attemptFee: '5.00' });
+  });
+});
+
+describe('moneyToCents', () => {
+  it('compares normalised amounts exactly', () => {
+    expect(moneyToCents('0.10') + moneyToCents('0.20')).toBe(moneyToCents('0.30'));
+    expect(moneyToCents('1234567.89')).toBe(123456789n);
+    expect(moneyToCents('5')).toBe(500n);
   });
 });

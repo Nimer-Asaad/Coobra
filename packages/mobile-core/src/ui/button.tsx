@@ -23,7 +23,9 @@ export function AppButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={title}
-      accessibilityState={{ disabled: Boolean(inactive), busy: Boolean(loading) }}
+      // aria-* (not accessibilityState) so busy/disabled also reach the web build.
+      aria-disabled={Boolean(inactive)}
+      aria-busy={Boolean(loading)}
       onPress={onPress}
       disabled={inactive}
       testID={testID}

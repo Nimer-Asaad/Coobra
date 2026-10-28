@@ -114,6 +114,8 @@ export function toShipmentDetails(shipment: ShipmentForDetails, labels: Labels):
           baseFee: pricing.baseFee ? money(pricing.baseFee) : null,
           finalFee: money(pricing.finalFee),
           returnFee: pricing.returnFee ? money(pricing.returnFee) : null,
+          returnPolicy: pricing.returnPolicy,
+          attemptFee: pricing.attemptFee ? money(pricing.attemptFee) : null,
           pricedAt: pricing.pricedAt.toISOString(),
           overrides: shipment.feeOverrides.map((override) => ({
             id: override.id,

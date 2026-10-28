@@ -11,7 +11,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { accounts, credit, debit, LedgerService } from './ledger.service.js';
+import { accounts, credit, debit, LedgerService, type PostingLine } from './ledger.service.js';
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; role: UserRole };
@@ -39,6 +39,14 @@ export function toReturnInfo(
     feeStatus: row.feeStatus,
     feeAmount: row.feeAmount ? money(row.feeAmount) : null,
     feeReason: row.feeReason,
+    feePolicy: row.feePolicy,
+    deliveryCharge: money(row.deliveryCharge),
+    totalCharge:
+      row.feeStatus === 'WAIVED'
+        ? '0.00'
+        : row.feeAmount
+          ? money(row.feeAmount.plus(row.deliveryCharge))
+          : null,
     completedAt: row.completedAt?.toISOString() ?? null,
     closedAt: row.closedAt?.toISOString() ?? null,
   };
@@ -47,8 +55,17 @@ export function toReturnInfo(
 /**
  * Return records and return fees. The fee comes from the shipment's pricing snapshot; without
  * one it is RETURN_FEE_UNCONFIGURED until a finance user sets it or waives it with a reason.
- * It is posted once, when the shipment is RETURNED and the fee is set. Nothing is refunded or
- * reversed automatically.
+ *
+ * The snapshot's return policy may add a delivery charge (see RETURN_FEE_POLICIES): the
+ * shipment's delivery fee (DELIVERY_PLUS_RETURN) or the rule's failed-attempt fee
+ * (REDUCED_ATTEMPT_PLUS_RETURN). It is fixed when the record is created, applies only after a
+ * failed delivery attempt, and is never charged when a delivery fee was already posted. A
+ * waiver waives the whole return charge.
+ *
+ * Everything is posted once, in a single RETURN_FEE entry, when the shipment is RETURNED and
+ * the fee is decided. A delivered shipment's fee is earned on delivery (DELIVERY_FEE); a
+ * returned one is never delivered. Nothing is refunded or reversed automatically: corrections
+ * go through financial adjustments.
  */
 @Injectable()
 export class ReturnsService {
@@ -58,7 +75,32 @@ export class ReturnsService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Creates the record (once) with the fee from the pricing snapshot, if any. */
+  /**
+   * The delivery or failed-attempt part of the return charge under the snapshot's policy.
+   * Conservative where the policy is silent: nothing without a failed delivery attempt, the
+   * attempt fee capped at the shipment's delivery fee, nothing if a delivery fee was posted.
+   */
+  private async deliveryCharge(
+    tx: Tx,
+    shipmentId: string,
+    pricing: { returnPolicy: ReturnRecord['feePolicy']; attemptFee: Prisma.Decimal | null } | null,
+  ): Promise<Prisma.Decimal> {
+    const zero = new Prisma.Decimal(0);
+    if (!pricing || pricing.returnPolicy === 'RETURN_ONLY') return zero;
+    const shipment = await tx.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+    const failedAttempts = await tx.shipmentStatusHistory.count({
+      where: { shipmentId, toStatus: 'DELIVERY_FAILED' },
+    });
+    if (failedAttempts === 0 || !shipment.deliveryFee) return zero;
+    const feePosted = await tx.journalEntry.count({
+      where: { sourceId: shipmentId, kind: { in: ['DELIVERY_FEE', 'PHASE2_BACKFILL'] } },
+    });
+    if (feePosted > 0) return zero;
+    if (pricing.returnPolicy === 'DELIVERY_PLUS_RETURN') return shipment.deliveryFee;
+    return Prisma.Decimal.min(pricing.attemptFee ?? zero, shipment.deliveryFee);
+  }
+
+  /** Creates the record (once) with the fee and policy from the pricing snapshot, if any. */
   async ensureRecord(
     tx: Tx,
     shipment: Pick<Shipment, 'id'>,
@@ -76,6 +118,8 @@ export class ReturnsService {
         feeStatus: configured ? 'SET' : 'RETURN_FEE_UNCONFIGURED',
         feeAmount: configured,
         feeReason: configured ? 'Return fee from the pricing rule' : null,
+        feePolicy: pricing?.returnPolicy ?? 'RETURN_ONLY',
+        deliveryCharge: await this.deliveryCharge(tx, shipment.id, pricing),
       },
     });
   }
@@ -124,17 +168,25 @@ export class ReturnsService {
     }
     if (record.feeStatus !== 'SET' || !record.feeAmount) return;
     let journalEntryId: string | null = null;
-    if (record.feeAmount.greaterThan(0)) {
+    const total = record.feeAmount.plus(record.deliveryCharge);
+    if (total.greaterThan(0)) {
+      // One entry per return record (unique per kind and source): posted exactly once.
+      const lines: PostingLine[] = [
+        debit(accounts.merchantBalance(shipment.merchantId), total, shipment.id),
+      ];
+      if (record.feeAmount.greaterThan(0)) {
+        lines.push(credit(accounts.returnFeeRevenue(), record.feeAmount, shipment.id));
+      }
+      if (record.deliveryCharge.greaterThan(0)) {
+        lines.push(credit(accounts.deliveryFeeRevenue(), record.deliveryCharge, shipment.id));
+      }
       const entry = await this.ledger.post(tx, {
         kind: 'RETURN_FEE',
         sourceType: 'return_record',
         sourceId: recordId,
         createdById: actorId,
-        description: `Return fee ${shipment.trackingNumber}`,
-        lines: [
-          debit(accounts.merchantBalance(shipment.merchantId), record.feeAmount, shipment.id),
-          credit(accounts.returnFeeRevenue(), record.feeAmount, shipment.id),
-        ],
+        description: `Return fee ${shipment.trackingNumber} (${record.feePolicy})`,
+        lines,
       });
       journalEntryId = entry.id;
     }
@@ -173,13 +225,20 @@ export class ReturnsService {
       });
       await this.settleFee(tx, shipment, record.id, actor.id);
     });
+    const info = await this.get(shipmentId);
     await this.audit.record({
       action: 'RETURN_FEE_SET',
       actorUserId: actor.id,
       meta,
-      metadata: { shipmentId, amount: input.amount, reason: input.reason },
+      metadata: {
+        shipmentId,
+        amount: input.amount,
+        reason: input.reason,
+        feePolicy: info.feePolicy,
+        deliveryCharge: info.deliveryCharge,
+      },
     });
-    return this.get(shipmentId);
+    return info;
   }
 
   async waive(actor: Actor, shipmentId: string, input: WaiveReturnFeeInput, meta: RequestMeta) {
@@ -197,13 +256,19 @@ export class ReturnsService {
       });
       await this.settleFee(tx, shipment, record.id, actor.id);
     });
+    const info = await this.get(shipmentId);
     await this.audit.record({
       action: 'RETURN_FEE_WAIVED',
       actorUserId: actor.id,
       meta,
-      metadata: { shipmentId, reason: input.reason },
+      metadata: {
+        shipmentId,
+        reason: input.reason,
+        feePolicy: info.feePolicy,
+        waivedDeliveryCharge: info.deliveryCharge,
+      },
     });
-    return this.get(shipmentId);
+    return info;
   }
 
   async get(shipmentId: string): Promise<ShipmentReturnInfo> {

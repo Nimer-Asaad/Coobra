@@ -88,6 +88,24 @@ export function ReturnInfoBlock({
             ) : null}
           </dd>
         </div>
+        <div>
+          <dt className="text-muted-foreground">{t('returns.policy')}</dt>
+          <dd>{t(`pricing.returnPolicies.${info.feePolicy}`)}</dd>
+        </div>
+        {info.deliveryCharge !== '0.00' ? (
+          <div>
+            <dt className="text-muted-foreground">{t('returns.deliveryCharge')}</dt>
+            <dd>
+              <Amount value={info.deliveryCharge} />
+            </dd>
+          </div>
+        ) : null}
+        <div>
+          <dt className="text-muted-foreground">{t('returns.totalCharge')}</dt>
+          <dd className="font-medium">
+            {info.totalCharge !== null ? <Amount value={info.totalCharge} /> : '—'}
+          </dd>
+        </div>
         {info.completedAt ? (
           <div>
             <dt className="text-muted-foreground">{t('returns.completed')}</dt>
@@ -156,6 +174,7 @@ export function ReturnInfoBlock({
               error={waive.error}
               onSubmit={(form) => waive.mutateAsync({ reason: text(form, 'reason') })}
             >
+              <p className="text-xs text-muted-foreground">{t('returns.waiveHint')}</p>
               <FormField name="reason" label={t('finance.reason')} />
               {waiveError('reason')}
             </InlineAction>

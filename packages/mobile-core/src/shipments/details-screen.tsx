@@ -249,6 +249,18 @@ export function ShipmentDetailsScreen() {
               s.returnInfo.feeAmount ? ` · ${formatMoney(s.returnInfo.feeAmount, language)}` : ''
             }`}
           />
+          {s.returnInfo.deliveryCharge !== '0.00' ? (
+            <InfoRow
+              label={t('returns.deliveryCharge')}
+              value={formatMoney(s.returnInfo.deliveryCharge, language)}
+            />
+          ) : null}
+          {s.returnInfo.totalCharge !== null ? (
+            <InfoRow
+              label={t('returns.totalCharge')}
+              value={formatMoney(s.returnInfo.totalCharge, language)}
+            />
+          ) : null}
           {s.returnInfo.returnDriver ? (
             <InfoRow label={t('returns.returnDriver')} value={s.returnInfo.returnDriver.fullName} />
           ) : null}
@@ -349,7 +361,7 @@ function TransitionAction({
  * Delivery confirmation. Cash collection is never assumed: the driver answers explicitly,
  * types the amount, and confirms the hand-over. The API re-validates everything.
  */
-function DeliverPanel({
+export function DeliverPanel({
   shipment,
   loading,
   error,
@@ -488,7 +500,8 @@ function Choice({
     <Pressable
       accessibilityRole={checkbox ? 'checkbox' : 'radio'}
       accessibilityLabel={label}
-      accessibilityState={{ checked: selected }}
+      // aria-* (not accessibilityState) so the checked state also reaches the web build.
+      aria-checked={selected}
       onPress={onPress}
       style={[styles.choice, selected && styles.choiceSelected, checkbox && styles.checkbox]}
       testID={testID}

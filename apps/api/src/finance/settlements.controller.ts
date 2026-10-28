@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import {
+  CASH_COUNT_ROLES,
   confirmSettlementSchema,
   decisionSchema,
   driverRepaymentSchema,
@@ -8,6 +9,8 @@ import {
   FINANCE_ROLES,
   FINANCE_VIEW_ROLES,
   rejectionSchema,
+  SETTLEMENT_RECORDER_ROLES,
+  SETTLEMENT_VIEW_ROLES,
   staffSettlementSchema,
   submitSettlementSchema,
   type ConfirmSettlementInput,
@@ -29,7 +32,10 @@ const settlementQuery = z.object({
   driverId: z.uuid().optional(),
 });
 
-/** Admin: driver cash balances, settlements, cash shortages and repayments. */
+/**
+ * Admin: driver cash balances, settlements, cash shortages and repayments. Operations register
+ * cash hand-overs; only an accountant counts and decides them (see CASH_COUNT_ROLES).
+ */
 @Controller('admin/finance')
 @Roles(...FINANCE_VIEW_ROLES)
 export class AdminSettlementsController {
@@ -40,12 +46,13 @@ export class AdminSettlementsController {
     return this.settlements.driverBalances();
   }
 
+  @Roles(...SETTLEMENT_VIEW_ROLES)
   @Get('settlements')
   list(@Query(new ZodValidationPipe(settlementQuery)) query: z.infer<typeof settlementQuery>) {
     return this.settlements.listSettlements(query);
   }
 
-  @Roles(...FINANCE_ROLES)
+  @Roles(...SETTLEMENT_RECORDER_ROLES)
   @Post('settlements')
   recordAtCounter(
     @Auth() auth: RequestAuth,
@@ -57,7 +64,7 @@ export class AdminSettlementsController {
     return this.settlements.submit(auth.user, driverId, input, key, meta);
   }
 
-  @Roles(...FINANCE_ROLES)
+  @Roles(...CASH_COUNT_ROLES)
   @HttpCode(200)
   @Post('settlements/:id/confirm')
   confirm(
@@ -70,7 +77,7 @@ export class AdminSettlementsController {
     return this.settlements.confirm(auth.user, id, body, key, meta);
   }
 
-  @Roles(...FINANCE_ROLES)
+  @Roles(...CASH_COUNT_ROLES)
   @HttpCode(200)
   @Post('settlements/:id/reject')
   reject(
@@ -87,7 +94,7 @@ export class AdminSettlementsController {
     return this.settlements.listShortages();
   }
 
-  @Roles(...FINANCE_ROLES)
+  @Roles(...CASH_COUNT_ROLES)
   @Post('driver-shortages')
   proposeShortage(
     @Auth() auth: RequestAuth,
