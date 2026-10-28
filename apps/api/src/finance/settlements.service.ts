@@ -395,6 +395,9 @@ export class SettlementsService {
   /** An accountant records a counted cash discrepancy; a second finance user approves it. */
   async proposeShortage(actor: Actor, input: DriverShortageInput, meta: RequestMeta) {
     if (!(CASH_COUNT_ROLES as readonly UserRole[]).includes(actor.role)) throw Errors.forbidden();
+    if (!decimal(input.amount).greaterThan(0)) {
+      throw Errors.validation({ amount: 'validation.money.invalid' });
+    }
     const db = this.prisma.client;
     await this.assertDriver(db, input.driverId);
     if (decimal(input.amount).greaterThan(await this.uncleared(db, input.driverId))) {
@@ -504,14 +507,25 @@ export class SettlementsService {
     return rows.map(toShortageItem);
   }
 
+  /**
+   * An accountant receives and posts a repayment of the driver's debt (DRIVER_RECEIVABLE).
+   * Never more than the debt; the receivable is locked so concurrent repayments cannot overpay,
+   * and the Idempotency-Key makes a retried request return the first result.
+   */
   recordRepayment(actor: Actor, input: DriverRepaymentInput, key: string, meta: RequestMeta) {
+    if (!(CASH_COUNT_ROLES as readonly UserRole[]).includes(actor.role)) throw Errors.forbidden();
+    if (!decimal(input.amount).greaterThan(0)) {
+      throw Errors.validation({ amount: 'validation.money.invalid' });
+    }
     return this.idempotency.run(actor.id, 'driver-repayment', key, input, async () => {
       const id = randomUUID();
-      await this.prisma.client.$transaction(async (tx) => {
+      let outstandingBefore = new Prisma.Decimal(0);
+      const entryId = await this.prisma.client.$transaction(async (tx) => {
         await this.assertDriver(tx, input.driverId);
         const receivable = accounts.driverReceivable(input.driverId);
         await this.ledger.lock(tx, receivable);
-        if (decimal(input.amount).greaterThan(await this.ledger.balance(tx, receivable))) {
+        outstandingBefore = await this.ledger.balance(tx, receivable);
+        if (decimal(input.amount).greaterThan(outstandingBefore)) {
           throw Errors.insufficientFunds('The amount is more than what the driver owes');
         }
         const entry = await this.ledger.post(tx, {
@@ -536,13 +550,22 @@ export class SettlementsService {
             journalEntryId: entry.id,
           },
         });
+        return entry.id;
       });
       await this.audit.record({
         action: 'DRIVER_REPAYMENT_RECORDED',
         actorUserId: actor.id,
         targetUserId: input.driverId,
         meta,
-        metadata: { repaymentId: id, amount: input.amount, channel: input.channel },
+        metadata: {
+          repaymentId: id,
+          journalEntryId: entryId,
+          debtAccount: this.ledger.accountCode(accounts.driverReceivable(input.driverId)),
+          amount: money(decimal(input.amount)),
+          outstandingBefore: money(outstandingBefore),
+          outstandingAfter: money(outstandingBefore.minus(decimal(input.amount))),
+          channel: input.channel,
+        },
       });
       return { id };
     });

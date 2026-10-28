@@ -27,7 +27,8 @@ export const SETTLEMENT_RECORDER_ROLES = [
 ] as const satisfies readonly UserRole[];
 /**
  * Counting cash is the accountant's job: only an accountant confirms or rejects a driver
- * settlement and records a cash discrepancy (shortage). Never the person who registered it.
+ * settlement, records a cash discrepancy (shortage) and posts a driver's debt repayment. A
+ * settlement is never decided by the person who registered it.
  */
 export const CASH_COUNT_ROLES = ['ACCOUNTANT'] as const satisfies readonly UserRole[];
 /** May see driver settlements (operations see what they registered and its outcome). */
@@ -423,10 +424,29 @@ export interface MerchantBalanceRow extends Omit<MerchantFinanceSummary, 'payout
 
 /** A ledger figure recomputed from operational records; `difference` must be "0.00". */
 export interface ReconciliationCheck {
-  key: 'TRIAL_BALANCE' | 'DRIVER_CUSTODY' | 'MERCHANT_COD_PENDING' | 'MERCHANT_PAYOUTS';
+  key:
+    | 'TRIAL_BALANCE'
+    | 'DRIVER_CUSTODY'
+    | 'MERCHANT_COD_PENDING'
+    | 'MERCHANT_PAYOUTS'
+    | 'MERCHANT_ADJUSTMENTS';
   ledger: string;
   operational: string;
   difference: string;
+}
+
+/**
+ * Approved merchant settlement adjustments in a period. The ledger keeps them in one net
+ * account (ADJUSTMENT_EXPENSE, ADR 0001); reports show each direction as a positive amount:
+ * credits to merchants (debited to the account) and debits to merchants (credited to it).
+ */
+export interface MerchantAdjustmentTotals {
+  credits: string;
+  creditCount: number;
+  debits: string;
+  debitCount: number;
+  /** credits − debits: positive = net credited to merchants, negative = net charged to them. */
+  net: string;
 }
 
 export interface FinanceOverview {
@@ -448,7 +468,7 @@ export interface FinanceOverview {
     returnFees: string;
     codShortfallExpense: string;
     driverCashLossExpense: string;
-    adjustmentExpense: string;
+    merchantAdjustments: MerchantAdjustmentTotals;
   };
   queues: {
     shortfallsOpen: number;
@@ -487,5 +507,6 @@ export const CSV_REPORTS = [
   'driver-balances',
   'journal',
   'delivered-shipments',
+  'merchant-adjustments',
 ] as const;
 export type CsvReport = (typeof CSV_REPORTS)[number];

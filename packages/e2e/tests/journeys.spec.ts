@@ -90,12 +90,15 @@ test('driver hands over cash; only an accountant counts and confirms it', async 
     await page.getByRole('tab', { name: 'Driver cash' }).click();
     await expect(page.getByText('Waiting to be counted').first()).toBeVisible();
     await expect(page.getByRole('button', { name: confirm, exact: true })).toHaveCount(0);
+    // Debt repayments are posted by an accountant only.
+    await expect(page.getByRole('button', { name: 'Record a driver repayment' })).toHaveCount(0);
   }
 
   // The accountant counts 100 of the declared 120.
   const accountant = await signInAdmin(browser, 'accountant');
   await accountant.goto(`${URLS.admin}/finance`);
   await accountant.getByRole('tab', { name: 'Driver cash' }).click();
+  await expect(accountant.getByRole('button', { name: 'Record a driver repayment' })).toBeVisible();
   await accountant.getByRole('button', { name: confirm, exact: true }).click();
   await accountant.getByLabel('Counted').fill('100');
   await accountant.getByRole('button', { name: confirm, exact: true }).click();

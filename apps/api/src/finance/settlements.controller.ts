@@ -130,7 +130,7 @@ export class AdminSettlementsController {
     return this.settlements.decideShortage(auth.user, id, false, body.note, key, meta);
   }
 
-  @Roles(...FINANCE_ROLES)
+  @Roles(...CASH_COUNT_ROLES)
   @Post('driver-repayments')
   repayment(
     @Auth() auth: RequestAuth,

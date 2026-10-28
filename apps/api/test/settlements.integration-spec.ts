@@ -364,4 +364,84 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
     expect(await balance(`DRIVER_CUSTODY:${driver.id}`)).toBe('0.00');
     expect(await balance(`MERCHANT_BALANCE:${merchantA.id}`)).toBe('185.00');
   });
+
+  it('lets only an accountant post a driver debt repayment, once and never above the debt', async () => {
+    await delivered(merchantA, '200');
+    const shortage = await api(accountant)
+      .post('/v1/admin/finance/driver-shortages', {
+        driverId: driver.id,
+        amount: '100',
+        responsibility: 'DRIVER_LIABLE',
+        reason: 'Lost 100 ILS',
+      })
+      .expect(201);
+    await api(admin)
+      .post(`/v1/admin/finance/driver-shortages/${shortage.body.id}/approve`, {}, newKey())
+      .expect(200);
+    const debt = `DRIVER_RECEIVABLE:${driver.id}`;
+    expect(await balance(debt)).toBe('100.00');
+    const repay = (user: TestUser, amount: string, key = newKey()) =>
+      api(user).post(
+        '/v1/admin/finance/driver-repayments',
+        { driverId: driver.id, amount, channel: 'HUB' },
+        key,
+      );
+
+    // Nobody but an accountant can post it, whatever the role.
+    for (const user of [admin, ops, viewer, driver, merchantA]) {
+      await repay(user, '10').expect(403);
+    }
+    expect(await balance(debt)).toBe('100.00');
+    expect(await ctx.prisma.journalEntry.count({ where: { kind: 'DRIVER_REPAYMENT' } })).toBe(0);
+
+    // A retried request (same Idempotency-Key) returns the first result: one posting.
+    const key = newKey();
+    const first = await repay(accountant, '30', key).expect(201);
+    const replay = await repay(accountant, '30', key).expect(201);
+    expect(replay.body.id).toBe(first.body.id);
+    expect(await ctx.prisma.journalEntry.count({ where: { kind: 'DRIVER_REPAYMENT' } })).toBe(1);
+    expect(await balance(debt)).toBe('70.00');
+
+    // Two accountants post 60 each against the remaining 70 at once: only one succeeds.
+    const [a, b] = await Promise.all([repay(accountant, '60'), repay(accountant2, '60')]);
+    expect([a.status, b.status].sort()).toEqual([201, 422]);
+    expect(await balance(debt)).toBe('10.00');
+    expect((await repay(accountant, '10.01').expect(422)).body.code).toBe('INSUFFICIENT_FUNDS');
+    // Zero amounts are refused as invalid input (they used to fail with a server error).
+    expect((await repay(accountant, '0').expect(400)).body.fieldErrors).toEqual({
+      amount: 'validation.money.invalid',
+    });
+    await api(accountant)
+      .post('/v1/admin/finance/driver-shortages', {
+        driverId: driver.id,
+        amount: '0',
+        responsibility: 'DRIVER_LIABLE',
+        reason: 'Nothing',
+      })
+      .expect(400);
+
+    const row = await ctx.prisma.driverRepayment.findUniqueOrThrow({
+      where: { id: first.body.id },
+    });
+    const entry = await ctx.prisma.journalEntry.findUniqueOrThrow({
+      where: { id: row.journalEntryId },
+    });
+    expect(row).toMatchObject({ driverId: driver.id, recordedById: accountant.id });
+    expect(row.amount.toFixed(2)).toBe('30.00');
+    expect(row.createdAt).toBeInstanceOf(Date);
+    expect(entry).toMatchObject({ kind: 'DRIVER_REPAYMENT', createdById: accountant.id });
+    const audit = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'DRIVER_REPAYMENT_RECORDED', actorUserId: accountant.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(audit.metadata).toMatchObject({
+      repaymentId: first.body.id,
+      journalEntryId: row.journalEntryId,
+      debtAccount: debt,
+      amount: '30.00',
+      outstandingBefore: '100.00',
+      outstandingAfter: '70.00',
+    });
+    expect(await balance('COMPANY_CASH_HUB')).toBe('90.00');
+  });
 });

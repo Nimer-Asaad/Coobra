@@ -259,7 +259,6 @@ export const en = {
     returnFees: 'Return fees',
     codShortfallExpense: 'Shortfalls borne by COOBRA',
     driverCashLossExpense: 'Driver cash losses borne by COOBRA',
-    adjustmentExpense: 'Merchant adjustments',
     apply: 'Apply',
     queuesTitle: 'Waiting for action',
     queues: {
@@ -282,6 +281,7 @@ export const en = {
       DRIVER_CUSTODY: 'Cash with drivers',
       MERCHANT_COD_PENDING: 'COD pending for merchants',
       MERCHANT_PAYOUTS: 'Paid payouts',
+      MERCHANT_ADJUSTMENTS: 'Merchant settlement adjustments',
     },
     ledger: 'Ledger',
     records: 'Records',
@@ -291,6 +291,16 @@ export const en = {
       driverBalances: 'Driver cash',
       journal: 'Journal',
       deliveredShipments: 'Delivered and returned shipments',
+      merchantAdjustments: 'Merchant settlement adjustments',
+    },
+    merchantAdjustments: {
+      title: 'Merchant settlement adjustments',
+      hint: 'Approved manual adjustments to merchant balances. Shown as positive amounts by direction; they are settlement adjustments, not revenue.',
+      credits: 'Credits to merchants ({{count}})',
+      debits: 'Debits to merchants ({{count}})',
+      netCredit: 'Net credited to merchants',
+      netDebit: 'Net charged to merchants',
+      netNone: 'Net',
     },
     threshold: 'Approval limit',
     thresholdHint:

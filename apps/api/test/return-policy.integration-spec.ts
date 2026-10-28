@@ -332,6 +332,107 @@ describe('Return-fee policies (PostgreSQL integration)', () => {
     expect(revised.metadata).toMatchObject({ returnPolicy: 'REDUCED_ATTEMPT_PLUS_RETURN' });
   });
 
+  describe('approved rules (ADR 0002)', () => {
+    const reduced = { returnPolicy: 'REDUCED_ATTEMPT_PLUS_RETURN', attemptFee: '5' };
+    const entries = (kind: 'RETURN_FEE' | 'DELIVERY_FEE') =>
+      ctx.prisma.journalEntry.count({ where: { kind } });
+
+    it('rule 1: no attempt fee unless a delivery attempt actually failed', async () => {
+      await setPolicy(zones.ramallah, reduced);
+      const shipment = await create();
+      await api(ops)
+        .post(`/v1/admin/shipments/${shipment.id}/assign`, { driverId: driver.id })
+        .expect(200);
+      await move(driver, shipment.id, 'PICKED_UP').expect(200);
+      await move(ops, shipment.id, 'RETURN_REQUESTED', 'Merchant asked to stop').expect(200);
+      const details = (await move(ops, shipment.id, 'RETURNED').expect(200))
+        .body as ShipmentDetails;
+      expect(details.returnInfo).toMatchObject({
+        feePolicy: 'REDUCED_ATTEMPT_PLUS_RETURN',
+        deliveryCharge: '0.00',
+        totalCharge: '10.00',
+      });
+      expect(await balance('DELIVERY_FEE_REVENUE')).toBe('0.00');
+      expect(await balance(`MERCHANT_BALANCE:${merchant.id}`)).toBe('-10.00');
+    });
+
+    it('rule 2: one attempt fee per shipment, however many attempts failed', async () => {
+      await setPolicy(zones.ramallah, reduced);
+      const shipment = await create();
+      await api(ops)
+        .post(`/v1/admin/shipments/${shipment.id}/assign`, { driverId: driver.id })
+        .expect(200);
+      await move(driver, shipment.id, 'PICKED_UP').expect(200);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await move(driver, shipment.id, 'OUT_FOR_DELIVERY').expect(200);
+        await move(driver, shipment.id, 'DELIVERY_FAILED', `Attempt ${attempt + 1}`).expect(200);
+      }
+      await move(merchant, shipment.id, 'RETURN_REQUESTED', 'Give up').expect(200);
+      const details = (await move(ops, shipment.id, 'RETURNED').expect(200))
+        .body as ShipmentDetails;
+      expect(
+        await ctx.prisma.shipmentStatusHistory.count({
+          where: { shipmentId: shipment.id, toStatus: 'DELIVERY_FAILED' },
+        }),
+      ).toBe(3);
+      expect(details.returnInfo).toMatchObject({ deliveryCharge: '5.00', totalCharge: '15.00' });
+      expect(await balance('DELIVERY_FEE_REVENUE')).toBe('5.00');
+      expect(await entries('RETURN_FEE')).toBe(1);
+      expect(await entries('DELIVERY_FEE')).toBe(0);
+    });
+
+    it('rule 3: a waiver removes every return-related charge', async () => {
+      for (const policy of [{ returnPolicy: 'DELIVERY_PLUS_RETURN' }, reduced]) {
+        await setPolicy(zones.ramallah, policy);
+        const shipment = await create();
+        await failAndReturn(shipment.id, merchant, false);
+        await api(accountant)
+          .post(`/v1/admin/returns/${shipment.id}/waive`, { reason: 'Our mistake' })
+          .expect(200);
+        const details = (await move(ops, shipment.id, 'RETURNED').expect(200))
+          .body as ShipmentDetails;
+        expect(details.returnInfo).toMatchObject({ feeStatus: 'WAIVED', totalCharge: '0.00' });
+        // A waived return can never be charged later.
+        await api(accountant)
+          .post(`/v1/admin/returns/${shipment.id}/fee`, { amount: '10', reason: 'Charge it' })
+          .expect(409);
+      }
+      expect(await ctx.prisma.journalEntry.count()).toBe(0);
+      expect(await balance(`MERCHANT_BALANCE:${merchant.id}`)).toBe('0.00');
+    });
+
+    it('never posts a return charge twice, even when posting is retried directly', async () => {
+      await setPolicy(zones.ramallah, { returnPolicy: 'DELIVERY_PLUS_RETURN' });
+      const shipment = await create();
+      await failAndReturn(shipment.id);
+      const entry = await ctx.prisma.journalEntry.findFirstOrThrow({
+        where: { kind: 'RETURN_FEE' },
+      });
+      // The database refuses a second entry for the same return record.
+      await expect(
+        ctx.prisma.journalEntry.create({
+          data: { kind: 'RETURN_FEE', sourceType: entry.sourceType, sourceId: entry.sourceId },
+        }),
+      ).rejects.toThrow();
+      // Repeating the office hand-back is refused; still one charge of 25.
+      await move(ops, shipment.id, 'RETURNED').expect(409);
+      expect(await entries('RETURN_FEE')).toBe(1);
+      expect(await balance(`MERCHANT_BALANCE:${merchant.id}`)).toBe('-25.00');
+    });
+
+    it('keeps old snapshots and posted entries when the policy changes later', async () => {
+      const old = await create(); // RETURN_ONLY snapshot
+      await failAndReturn(old.id);
+      const posted = await ctx.prisma.journalEntry.findMany({ include: { lines: true } });
+      await setPolicy(zones.ramallah, { returnPolicy: 'DELIVERY_PLUS_RETURN' });
+      const snapshot = await ctx.prisma.shipmentPricing.findUniqueOrThrow({
+        where: { shipmentId: old.id },
+      });
+      expect(snapshot.returnPolicy).toBe('RETURN_ONLY');
+      expect(await ctx.prisma.journalEntry.findMany({ include: { lines: true } })).toEqual(posted);
+    });
+  });
+
   it('refuses inconsistent policy rows at the database level', async () => {
     const rule = await ruleFor(zones.ramallah);
     await expect(

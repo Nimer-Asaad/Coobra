@@ -17,6 +17,7 @@ import {
   type DriverShortageItem,
   type FinanceOverview,
   type FinanceSettingItem,
+  type MerchantAdjustmentTotals,
   type MerchantBalanceRow,
   type PayoutItem,
   type SettlementItem,
@@ -48,6 +49,23 @@ function useBffPost(path: string, withKey = true) {
 const optional = (form: FormData, key: string) => text(form, key) || undefined;
 
 const hasRole = (roles: readonly UserRole[], role: UserRole) => roles.includes(role);
+
+/**
+ * What a role may do on the Driver cash tab. Display only: the API enforces the same rules.
+ * - canSeeMoney: custody balances and cash shortages
+ * - canManage: approve or reject cash shortages (second finance person)
+ * - canRecord: register a hand-over at the counter
+ * - canCount: count/confirm settlements, record shortages and post debt repayments
+ */
+export function driverCashAccess(role: UserRole) {
+  const isFinance = role === 'SUPER_ADMIN' || role === 'ACCOUNTANT';
+  return {
+    canSeeMoney: isFinance || role === 'OWNER_VIEWER',
+    canManage: isFinance,
+    canRecord: hasRole(SETTLEMENT_RECORDER_ROLES, role),
+    canCount: hasRole(CASH_COUNT_ROLES, role),
+  };
+}
 
 export function FinancePanel({ role, userId }: { role: UserRole; userId: string }) {
   const { t } = useTranslation();
@@ -83,15 +101,7 @@ export function FinancePanel({ role, userId }: { role: UserRole; userId: string 
         </div>
       </div>
       {tab === 'overview' ? <OverviewTab isSuperAdmin={role === 'SUPER_ADMIN'} /> : null}
-      {tab === 'drivers' ? (
-        <DriversTab
-          canSeeMoney={canView}
-          canManage={isFinance}
-          canRecord={hasRole(SETTLEMENT_RECORDER_ROLES, role)}
-          canCount={hasRole(CASH_COUNT_ROLES, role)}
-          userId={userId}
-        />
-      ) : null}
+      {tab === 'drivers' ? <DriversTab {...driverCashAccess(role)} userId={userId} /> : null}
       {tab === 'merchants' ? <MerchantsTab canManage={isFinance} /> : null}
       {tab === 'reviews' ? (
         <ReviewsTab
@@ -148,6 +158,7 @@ function OverviewTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     ['driver-balances', 'driverBalances'],
     ['journal', 'journal'],
     ['delivered-shipments', 'deliveredShipments'],
+    ['merchant-adjustments', 'merchantAdjustments'],
   ] as const;
 
   return (
@@ -214,7 +225,6 @@ function OverviewTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                   'returnFees',
                   'codShortfallExpense',
                   'driverCashLossExpense',
-                  'adjustmentExpense',
                 ] as const
               ).map((key) => (
                 <div key={key} className="flex justify-between gap-2 rounded bg-muted/50 px-2 py-1">
@@ -225,6 +235,7 @@ function OverviewTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                 </div>
               ))}
             </dl>
+            <MerchantAdjustmentsSummary totals={o.period.merchantAdjustments} />
           </CardContent>
         </Card>
 
@@ -354,6 +365,49 @@ function OverviewTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   );
 }
 
+/**
+ * Merchant settlement adjustments, kept apart from revenue and expenses: each direction as a
+ * positive amount, and the net with its direction in words (never a negative expense).
+ */
+export function MerchantAdjustmentsSummary({ totals }: { totals: MerchantAdjustmentTotals }) {
+  const { t } = useTranslation();
+  const net = totals.net.startsWith('-') ? totals.net.slice(1) : totals.net;
+  const netLabel =
+    totals.net === '0.00'
+      ? t('finance.merchantAdjustments.netNone')
+      : totals.net.startsWith('-')
+        ? t('finance.merchantAdjustments.netDebit')
+        : t('finance.merchantAdjustments.netCredit');
+  return (
+    <section aria-labelledby="merchant-adjustments-title" className="flex flex-col gap-2">
+      <h3 id="merchant-adjustments-title" className="text-sm font-medium">
+        {t('finance.merchantAdjustments.title')}
+      </h3>
+      <p className="text-xs text-muted-foreground">{t('finance.merchantAdjustments.hint')}</p>
+      <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+        <div className="flex justify-between gap-2 rounded bg-muted/50 px-2 py-1">
+          <dt>{t('finance.merchantAdjustments.credits', { count: totals.creditCount })}</dt>
+          <dd className="font-medium">
+            <Amount value={totals.credits} />
+          </dd>
+        </div>
+        <div className="flex justify-between gap-2 rounded bg-muted/50 px-2 py-1">
+          <dt>{t('finance.merchantAdjustments.debits', { count: totals.debitCount })}</dt>
+          <dd className="font-medium">
+            <Amount value={totals.debits} />
+          </dd>
+        </div>
+        <div className="flex justify-between gap-2 rounded bg-muted/50 px-2 py-1">
+          <dt>{netLabel}</dt>
+          <dd className="font-medium">
+            <Amount value={net} />
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Driver cash
 // ---------------------------------------------------------------------------
@@ -378,7 +432,7 @@ function ChannelSelect({ name = 'channel', label }: { name?: string; label: stri
  * Driver cash. Operations and finance register hand-overs; only an accountant (never the one
  * who registered it) counts and confirms or rejects them, and records cash discrepancies.
  */
-function DriversTab({
+export function DriversTab({
   canSeeMoney,
   canManage,
   canRecord,
@@ -544,7 +598,7 @@ function DriversTab({
         ) : null}
       </div>
 
-      {canRecord || canManage ? (
+      {canRecord || canCount ? (
         <div className="flex flex-col gap-3">
           {canRecord ? (
             <InlineAction
@@ -603,7 +657,8 @@ function DriversTab({
               {proposeError('reason')}
             </InlineAction>
           ) : null}
-          {canManage ? (
+          {/* Receiving and posting a driver's debt repayment is the accountant's job. */}
+          {canCount ? (
             <InlineAction
               label={t('finance.repayment')}
               pending={repay.isPending}

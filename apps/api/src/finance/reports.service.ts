@@ -3,6 +3,7 @@ import { Prisma } from '@coobra/database';
 import type {
   FinanceOverview,
   JournalEntryItem,
+  MerchantAdjustmentTotals,
   Paginated,
   ReconciliationCheck,
 } from '@coobra/shared';
@@ -60,6 +61,35 @@ export class ReportsService {
     return (purpose: string) => totals.get(purpose) ?? decimal(0);
   }
 
+  /**
+   * Merchant settlement adjustments split by direction, from the posted journal lines on the net
+   * adjustment account: debit lines are credits to merchants, credit lines debits to merchants.
+   */
+  private async merchantAdjustments(from?: Date, to?: Date): Promise<MerchantAdjustmentTotals> {
+    const rows = await this.prisma.client.$queryRaw<
+      { side: string; total: string; entries: number }[]
+    >`
+      SELECT l.side::text AS side, COALESCE(SUM(l.amount), 0)::text AS total,
+             COUNT(DISTINCT l.entry_id)::int AS entries
+      FROM journal_lines l
+      JOIN journal_entries e ON e.id = l.entry_id
+      JOIN financial_accounts a ON a.id = l.account_id
+      WHERE e.kind = 'MERCHANT_ADJUSTMENT' AND a.purpose = 'ADJUSTMENT_EXPENSE'
+        AND (${from ?? null}::timestamp IS NULL OR l.created_at >= ${from ?? null}::timestamp)
+        AND (${to ?? null}::timestamp IS NULL OR l.created_at < ${to ?? null}::timestamp)
+      GROUP BY l.side`;
+    const side = (name: string) => rows.find((row) => row.side === name);
+    const credits = decimal(side('DEBIT')?.total ?? 0);
+    const debits = decimal(side('CREDIT')?.total ?? 0);
+    return {
+      credits: money(credits),
+      creditCount: side('DEBIT')?.entries ?? 0,
+      debits: money(debits),
+      debitCount: side('CREDIT')?.entries ?? 0,
+      net: money(credits.minus(debits)),
+    };
+  }
+
   async reconciliation(): Promise<ReconciliationCheck[]> {
     const db = this.prisma.client;
     const checks: ReconciliationCheck[] = [];
@@ -105,6 +135,17 @@ export class ReportsService {
       ledger: money(paidLedger),
       operational: money(paidOps),
       difference: money(paidLedger.minus(paidOps)),
+    });
+    // The net adjustment account against the approved adjustments (credits − debits).
+    const [applied] = await db.$queryRaw<{ net: string | null }[]>`
+      SELECT SUM(CASE WHEN type = 'MERCHANT_CREDIT' THEN amount ELSE -amount END)::text AS net
+      FROM financial_adjustments WHERE status = 'APPLIED'`;
+    const adjustmentsOps = decimal(applied?.net ?? 0);
+    checks.push({
+      key: 'MERCHANT_ADJUSTMENTS',
+      ledger: money(total('ADJUSTMENT_EXPENSE')),
+      operational: money(adjustmentsOps),
+      difference: money(total('ADJUSTMENT_EXPENSE').minus(adjustmentsOps)),
     });
     return checks;
   }
@@ -156,7 +197,7 @@ export class ReportsService {
         returnFees: money(period('RETURN_FEE_REVENUE')),
         codShortfallExpense: money(period('COD_SHORTFALL_EXPENSE')),
         driverCashLossExpense: money(period('DRIVER_CASH_LOSS_EXPENSE')),
-        adjustmentExpense: money(period('ADJUSTMENT_EXPENSE')),
+        merchantAdjustments: await this.merchantAdjustments(from, to),
       },
       queues: {
         shortfallsOpen: await db.codShortfall.count({ where: { status: { not: 'RESOLVED' } } }),
@@ -305,6 +346,46 @@ export class ReportsService {
             row.deliveryFee ? money(row.deliveryFee) : null,
             row.returnRecord?.feeAmount ? money(row.returnRecord.feeAmount) : null,
             row.deliveredAt?.toISOString() ?? null,
+          ]),
+        );
+      }
+      case 'merchant-adjustments': {
+        // One row per adjustment: a positive amount with its direction, never a signed expense.
+        const rows = await db.financialAdjustment.findMany({
+          include: {
+            merchant: { include: { merchantProfile: true } },
+            requestedBy: { select: { fullName: true } },
+            decidedBy: { select: { fullName: true } },
+          },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          take: 50_000,
+        });
+        return csv(
+          [
+            'requested_at',
+            'decided_at',
+            'merchant',
+            'type',
+            'direction',
+            'amount',
+            'status',
+            'reason',
+            'requested_by',
+            'decided_by',
+            'journal_entry_id',
+          ],
+          rows.map((row) => [
+            row.createdAt.toISOString(),
+            row.decidedAt?.toISOString() ?? null,
+            row.merchant.merchantProfile?.businessName ?? row.merchant.fullName,
+            row.type,
+            row.type === 'MERCHANT_CREDIT' ? 'credit_to_merchant' : 'debit_to_merchant',
+            money(row.amount),
+            row.status,
+            row.reason,
+            row.requestedBy.fullName,
+            row.decidedBy?.fullName ?? null,
+            row.journalEntryId,
           ]),
         );
       }
