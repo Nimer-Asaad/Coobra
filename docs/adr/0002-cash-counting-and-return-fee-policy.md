@@ -38,7 +38,16 @@ SELF_APPROVAL_FORBIDDEN`); another accountant must.
 - The amount must be positive and at most the outstanding debt (`422 INSUFFICIENT_FUNDS`); there is
   no approved rule for overpayment. The receivable is locked, so concurrent repayments cannot
   overpay; the Idempotency-Key makes a retried request return the first result (one posting).
-- Each repayment row keeps the driver, amount, channel, the accountant (`recorded_by_id`), the time
+- **Receipt reference (pre-merge safeguard):** every new repayment carries the number of the real
+  payment: the cash receipt number or the bank / e-wallet transfer reference. It is normalised
+  (trimmed, ASCII digits, upper case, single spaces) and unique per channel by a database index
+  (`driver_repayments_channel_receipt_reference_key`). Reusing it for any other repayment (another
+  accountant, another key, another amount or driver) is refused with
+  `validation.finance.referenceTaken`; two accountants posting the same receipt at once get one
+  posting. Separate payments with their own receipts are separate repayments even when the amounts
+  are equal. The same number on another channel is another document. Repayments recorded before
+  this change keep a NULL reference (NULLs never conflict); none is rewritten.
+- Each repayment row keeps the driver, amount, channel, receipt reference, the accountant (`recorded_by_id`), the time
   and its journal entry; the `DRIVER_REPAYMENT_RECORDED` audit record adds the debt account and the
   outstanding debt before and after. Historical repayments are unchanged.
 

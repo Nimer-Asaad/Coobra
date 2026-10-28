@@ -14,6 +14,7 @@ import {
   type UserRole,
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
+import { isUniqueViolation } from '../auth/auth.service.js';
 import { Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -510,7 +511,10 @@ export class SettlementsService {
   /**
    * An accountant receives and posts a repayment of the driver's debt (DRIVER_RECEIVABLE).
    * Never more than the debt; the receivable is locked so concurrent repayments cannot overpay,
-   * and the Idempotency-Key makes a retried request return the first result.
+   * and the Idempotency-Key makes a retried request return the first result. The receipt
+   * reference is unique per channel (database index): the same real payment entered by another
+   * accountant, or with another key, is refused; separate payments with their own receipts are
+   * separate repayments even when the amounts are equal.
    */
   recordRepayment(actor: Actor, input: DriverRepaymentInput, key: string, meta: RequestMeta) {
     if (!(CASH_COUNT_ROLES as readonly UserRole[]).includes(actor.role)) throw Errors.forbidden();
@@ -520,38 +524,55 @@ export class SettlementsService {
     return this.idempotency.run(actor.id, 'driver-repayment', key, input, async () => {
       const id = randomUUID();
       let outstandingBefore = new Prisma.Decimal(0);
-      const entryId = await this.prisma.client.$transaction(async (tx) => {
-        await this.assertDriver(tx, input.driverId);
-        const receivable = accounts.driverReceivable(input.driverId);
-        await this.ledger.lock(tx, receivable);
-        outstandingBefore = await this.ledger.balance(tx, receivable);
-        if (decimal(input.amount).greaterThan(outstandingBefore)) {
-          throw Errors.insufficientFunds('The amount is more than what the driver owes');
-        }
-        const entry = await this.ledger.post(tx, {
-          kind: 'DRIVER_REPAYMENT',
-          sourceType: 'driver_repayment',
-          sourceId: id,
-          createdById: actor.id,
-          description: 'Driver repayment',
-          lines: [
-            debit(accounts.companyCash(input.channel), input.amount),
-            credit(receivable, input.amount),
-          ],
+      const referenceTaken = () =>
+        Errors.validation({ receiptReference: 'validation.finance.referenceTaken' });
+      const post = () =>
+        this.prisma.client.$transaction(async (tx) => {
+          await this.assertDriver(tx, input.driverId);
+          const receivable = accounts.driverReceivable(input.driverId);
+          await this.ledger.lock(tx, receivable);
+          const used = await tx.driverRepayment.findFirst({
+            where: { channel: input.channel, receiptReference: input.receiptReference },
+            select: { id: true },
+          });
+          if (used) throw referenceTaken();
+          outstandingBefore = await this.ledger.balance(tx, receivable);
+          if (decimal(input.amount).greaterThan(outstandingBefore)) {
+            throw Errors.insufficientFunds('The amount is more than what the driver owes');
+          }
+          const entry = await this.ledger.post(tx, {
+            kind: 'DRIVER_REPAYMENT',
+            sourceType: 'driver_repayment',
+            sourceId: id,
+            createdById: actor.id,
+            description: 'Driver repayment',
+            lines: [
+              debit(accounts.companyCash(input.channel), input.amount),
+              credit(receivable, input.amount),
+            ],
+          });
+          await tx.driverRepayment.create({
+            data: {
+              id,
+              driverId: input.driverId,
+              amount: input.amount,
+              channel: input.channel,
+              receiptReference: input.receiptReference,
+              note: input.note ?? null,
+              recordedById: actor.id,
+              journalEntryId: entry.id,
+            },
+          });
+          return entry.id;
         });
-        await tx.driverRepayment.create({
-          data: {
-            id,
-            driverId: input.driverId,
-            amount: input.amount,
-            channel: input.channel,
-            note: input.note ?? null,
-            recordedById: actor.id,
-            journalEntryId: entry.id,
-          },
-        });
-        return entry.id;
-      });
+      let entryId: string;
+      try {
+        entryId = await post();
+      } catch (error) {
+        // Two accountants posting the same receipt at once: the unique index lets one through.
+        if (isUniqueViolation(error)) throw referenceTaken();
+        throw error;
+      }
       await this.audit.record({
         action: 'DRIVER_REPAYMENT_RECORDED',
         actorUserId: actor.id,
@@ -565,9 +586,10 @@ export class SettlementsService {
           outstandingBefore: money(outstandingBefore),
           outstandingAfter: money(outstandingBefore.minus(decimal(input.amount))),
           channel: input.channel,
+          receiptReference: input.receiptReference,
         },
       });
-      return { id };
+      return { id, receiptReference: input.receiptReference };
     });
   }
 

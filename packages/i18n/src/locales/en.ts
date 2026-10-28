@@ -347,6 +347,9 @@ export const en = {
     proposeShortage: 'Report a driver cash shortage',
     responsibility: { DRIVER_LIABLE: 'Driver pays it back', COMPANY_ABSORBS: 'COOBRA bears it' },
     repayment: 'Record a driver repayment',
+    receiptReference: 'Receipt / transfer number',
+    receiptReferenceHint:
+      'The number on the cash receipt, or the bank / e-wallet transfer reference. Each receipt can be used once.',
     balance: 'Balance',
     available: 'Available',
     reserved: 'Reserved',
@@ -701,6 +704,7 @@ export const en = {
       counted: 'The counted amount must be more than 0 and not more than the declared amount.',
       sameChannel: 'Choose two different accounts.',
       referenceTaken: 'This payment reference was already used.',
+      receiptReference: 'Enter the receipt or transfer number (2–64 letters or digits).',
     },
   },
   errors: {

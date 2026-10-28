@@ -338,11 +338,11 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
     expect(await balance(`MERCHANT_BALANCE:${merchantA.id}`)).toBe('85.00');
     expect(await balance(`MERCHANT_COD_PENDING:${merchantA.id}`)).toBe('100.00');
 
-    const repay = (amount: string) =>
+    const repay = (amount: string, key = newKey()) =>
       api(accountant).post(
         '/v1/admin/finance/driver-repayments',
-        { driverId: driver.id, amount, channel: 'HUB' },
-        newKey(),
+        { driverId: driver.id, amount, channel: 'HUB', receiptReference: `RC-${key}` },
+        key,
       );
     await repay('60').expect(201);
     expect((await repay('50').expect(422)).body.code).toBe('INSUFFICIENT_FUNDS');
@@ -383,7 +383,7 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
     const repay = (user: TestUser, amount: string, key = newKey()) =>
       api(user).post(
         '/v1/admin/finance/driver-repayments',
-        { driverId: driver.id, amount, channel: 'HUB' },
+        { driverId: driver.id, amount, channel: 'HUB', receiptReference: `RC-${key}` },
         key,
       );
 
@@ -443,5 +443,124 @@ describe('Driver settlements and cash shortages (PostgreSQL integration)', () =>
       outstandingAfter: '70.00',
     });
     expect(await balance('COMPANY_CASH_HUB')).toBe('90.00');
+  });
+
+  it('posts each real repayment once by its receipt reference, per channel', async () => {
+    await delivered(merchantA, '200');
+    await delivered(merchantB, '100', driver2);
+    // Both drivers owe 100 (driver-liable cash shortages).
+    for (const who of [driver, driver2]) {
+      const shortage = await api(accountant)
+        .post('/v1/admin/finance/driver-shortages', {
+          driverId: who.id,
+          amount: '100',
+          responsibility: 'DRIVER_LIABLE',
+          reason: 'Lost cash',
+        })
+        .expect(201);
+      await api(admin)
+        .post(`/v1/admin/finance/driver-shortages/${shortage.body.id}/approve`, {}, newKey())
+        .expect(200);
+    }
+    const repay = (
+      user: TestUser,
+      body: { amount: string; receiptReference?: string; channel?: string; driverId?: string },
+      key = newKey(),
+    ) =>
+      api(user).post(
+        '/v1/admin/finance/driver-repayments',
+        { driverId: driver.id, channel: 'HUB', ...body },
+        key,
+      );
+    const repayments = () => ctx.prisma.journalEntry.count({ where: { kind: 'DRIVER_REPAYMENT' } });
+    const fieldErrors = async (response: Promise<{ body: { fieldErrors?: object } }>) =>
+      (await response).body.fieldErrors;
+
+    // A reference is required and validated.
+    expect(await fieldErrors(repay(accountant, { amount: '10' }).expect(400))).toEqual({
+      receiptReference: 'validation.finance.receiptReference',
+    });
+    expect(
+      await fieldErrors(repay(accountant, { amount: '10', receiptReference: '#' }).expect(400)),
+    ).toEqual({ receiptReference: 'validation.finance.receiptReference' });
+
+    // The same paper receipt entered by two accountants at the same moment: one posting.
+    const [a, b] = await Promise.all([
+      repay(accountant, { amount: '20', receiptReference: 'RC-1001' }),
+      repay(accountant2, { amount: '20', receiptReference: 'RC-1001' }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 400]);
+    expect((a.status === 400 ? a : b).body.fieldErrors).toEqual({
+      receiptReference: 'validation.finance.referenceTaken',
+    });
+    expect(await repayments()).toBe(1);
+    expect(await balance(`DRIVER_RECEIVABLE:${driver.id}`)).toBe('80.00');
+
+    // Reused later, with other spelling, another amount or for another driver: refused.
+    for (const body of [
+      { amount: '20', receiptReference: ' rc-١٠٠١ ' },
+      { amount: '5', receiptReference: 'RC-1001' },
+      { amount: '20', receiptReference: 'RC-1001', driverId: driver2.id },
+    ]) {
+      expect(await fieldErrors(repay(accountant2, body).expect(400))).toEqual({
+        receiptReference: 'validation.finance.referenceTaken',
+      });
+    }
+    // Two receipts for the same driver against the same debt, at once: the one that would overpay
+    // is refused by the debt lock, not mistaken for a duplicate.
+    const [c, d] = await Promise.all([
+      repay(accountant, { amount: '50', receiptReference: 'RC-2001', driverId: driver2.id }),
+      repay(accountant2, { amount: '60', receiptReference: 'RC-2002', driverId: driver2.id }),
+    ]);
+    expect([c.status, d.status].sort()).toEqual([201, 422]);
+
+    // Separate real payments of equal amounts, each with its own receipt: all posted.
+    await repay(accountant, { amount: '20', receiptReference: 'RC-1002' }).expect(201);
+    await repay(accountant2, { amount: '20', receiptReference: 'RC-1003' }).expect(201);
+    // The same number on another channel is another document (e.g. a bank transfer reference).
+    await repay(accountant, {
+      amount: '20',
+      receiptReference: 'RC-1001',
+      channel: 'BANK',
+    }).expect(201);
+    expect(await repayments()).toBe(5);
+    expect(await balance(`DRIVER_RECEIVABLE:${driver.id}`)).toBe('20.00');
+
+    // Still accountant-only, even with a fresh receipt.
+    for (const user of [admin, ops, viewer, driver, merchantA]) {
+      await repay(user, { amount: '1', receiptReference: `RC-${user.role}` }).expect(403);
+    }
+
+    // Stored normalised and audited; the database itself refuses a duplicate.
+    const stored = await ctx.prisma.driverRepayment.findMany({
+      where: { driverId: driver.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(stored.map((row) => `${row.channel}:${row.receiptReference}`)).toEqual([
+      'HUB:RC-1001',
+      'HUB:RC-1002',
+      'HUB:RC-1003',
+      'BANK:RC-1001',
+    ]);
+    const first = stored[0]!;
+    await expect(
+      ctx.prisma.driverRepayment.create({
+        data: {
+          driverId: driver.id,
+          amount: '1',
+          channel: 'HUB',
+          receiptReference: 'RC-1001',
+          recordedById: accountant.id,
+          journalEntryId: first.journalEntryId,
+        },
+      }),
+    ).rejects.toThrow();
+    const audit = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: {
+        action: 'DRIVER_REPAYMENT_RECORDED',
+        metadata: { path: ['repaymentId'], equals: first.id },
+      },
+    });
+    expect(audit.metadata).toMatchObject({ receiptReference: 'RC-1001', channel: 'HUB' });
   });
 });

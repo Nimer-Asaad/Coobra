@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { reasonTextSchema } from './pricing.js';
 import type { UserRole } from './roles.js';
-import { MAX_COD_AMOUNT, moneySchema, type Currency } from './shipments.js';
+import { MAX_COD_AMOUNT, moneySchema, toAsciiDigits, type Currency } from './shipments.js';
 
 /*
  * Phase 3 finance contracts. Amounts are decimal strings; balances follow the ledger sign
@@ -253,10 +253,29 @@ export const driverShortageSchema = z.object({
 });
 export type DriverShortageInput = z.infer<typeof driverShortageSchema>;
 
+/**
+ * Normalises a receipt / transfer reference so the same paper receipt cannot be entered twice
+ * with different spelling: ASCII digits, upper case, single spaces.
+ */
+export function normalizeReceiptReference(value: string): string {
+  return toAsciiDigits(value).trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+export const receiptReferenceSchema = z
+  .string({ error: 'validation.finance.receiptReference' })
+  .transform(normalizeReceiptReference)
+  .pipe(
+    z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N} ./#-]{1,63}$/u, {
+      error: 'validation.finance.receiptReference',
+    }),
+  );
+
 export const driverRepaymentSchema = z.object({
   driverId: z.uuid({ error: 'validation.driver.required' }),
   amount: moneySchema(1_000_000),
   channel,
+  /** The receipt number (cash) or transfer reference (bank, e-wallet) of this payment. */
+  receiptReference: receiptReferenceSchema,
   note,
 });
 export type DriverRepaymentInput = z.infer<typeof driverRepaymentSchema>;

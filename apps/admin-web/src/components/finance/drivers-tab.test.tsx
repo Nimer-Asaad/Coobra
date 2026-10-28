@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { USER_ROLES, type UserRole } from '@coobra/shared';
 import { renderWithProviders } from '@/test/render';
@@ -42,4 +43,11 @@ describe('Driver cash controls by role', () => {
       expect(Boolean(screen.queryByRole('button', { name: RECORD }))).toBe(canRecord);
     },
   );
+
+  it('asks the accountant for the receipt or transfer number of a repayment', async () => {
+    renderWithProviders(<DriversTab {...driverCashAccess('ACCOUNTANT')} userId="me" />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: REPAY }));
+    expect(screen.getByLabelText('Receipt / transfer number')).toBeTruthy();
+    expect(screen.getByText(/Each receipt can be used once/)).toBeTruthy();
+  });
 });

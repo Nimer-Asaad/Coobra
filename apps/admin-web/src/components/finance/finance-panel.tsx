@@ -675,6 +675,13 @@ export function DriversTab({
               {driverSelect}
               <FormField name="amount" dir="ltr" inputMode="decimal" label={t('finance.amount')} />
               {repayError('amount')}
+              <FormField
+                name="receiptReference"
+                dir="ltr"
+                label={t('finance.receiptReference')}
+                hint={t('finance.receiptReferenceHint')}
+              />
+              {repayError('receiptReference')}
               <ChannelSelect label={t('finance.channel')} />
               <FormField name="note" label={t('finance.note')} />
             </InlineAction>

@@ -902,18 +902,23 @@ model CashClearing {
 
 /// A driver paying back an amount they were held liable for.
 model DriverRepayment {
-  id             String      @id @default(uuid(7)) @db.Uuid
-  driverId       String      @map("driver_id") @db.Uuid
-  amount         Decimal     @db.Decimal(12, 2)
-  channel        CashChannel @default(HUB)
-  note           String?
-  recordedById   String      @map("recorded_by_id") @db.Uuid
-  journalEntryId String      @unique @map("journal_entry_id") @db.Uuid
-  createdAt      DateTime    @default(now()) @map("created_at")
+  id               String      @id @default(uuid(7)) @db.Uuid
+  driverId         String      @map("driver_id") @db.Uuid
+  amount           Decimal     @db.Decimal(12, 2)
+  channel          CashChannel @default(HUB)
+  /// The receipt or transfer reference of the real payment (normalised). Unique per channel, so
+  /// the same cash cannot be posted twice by different accountants. Null only for repayments
+  /// recorded before references existed.
+  receiptReference String?     @map("receipt_reference")
+  note             String?
+  recordedById     String      @map("recorded_by_id") @db.Uuid
+  journalEntryId   String      @unique @map("journal_entry_id") @db.Uuid
+  createdAt        DateTime    @default(now()) @map("created_at")
 
   driver     User @relation("RepaymentDriver", fields: [driverId], references: [id], onDelete: Restrict)
   recordedBy User @relation("RepaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
 
+  @@unique([channel, receiptReference])
   @@index([driverId])
   @@map("driver_repayments")
 }

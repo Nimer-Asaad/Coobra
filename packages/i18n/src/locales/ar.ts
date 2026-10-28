@@ -339,6 +339,9 @@ export const ar: TranslationResource = {
     proposeShortage: 'تسجيل نقص نقدي لدى سائق',
     responsibility: { DRIVER_LIABLE: 'السائق يعيده', COMPANY_ABSORBS: 'كوبرا تتحمّله' },
     repayment: 'تسجيل سداد من السائق',
+    receiptReference: 'رقم الإيصال / التحويل',
+    receiptReferenceHint:
+      'الرقم المطبوع على إيصال النقد، أو مرجع التحويل البنكي أو المحفظة. كل إيصال يُستخدم مرة واحدة.',
     balance: 'الرصيد',
     available: 'المتاح',
     reserved: 'المحجوز',
@@ -692,6 +695,7 @@ export const ar: TranslationResource = {
       counted: 'يجب أن يكون المبلغ المعدود أكبر من صفر وألا يتجاوز المبلغ المصرّح به.',
       sameChannel: 'اختر حسابين مختلفين.',
       referenceTaken: 'مرجع الدفع هذا مستخدم من قبل.',
+      receiptReference: 'أدخل رقم الإيصال أو التحويل (من 2 إلى 64 حرفاً أو رقماً).',
     },
   },
   errors: {
