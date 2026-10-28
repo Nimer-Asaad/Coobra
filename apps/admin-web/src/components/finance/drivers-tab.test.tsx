@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { USER_ROLES, type UserRole } from '@coobra/shared';
+import { bff } from '@/lib/api-client';
 import { renderWithProviders } from '@/test/render';
 import { driverCashAccess, DriversTab } from './finance-panel';
 
@@ -44,10 +45,18 @@ describe('Driver cash controls by role', () => {
     },
   );
 
-  it('asks the accountant for the receipt or transfer number of a repayment', async () => {
+  it('sends the receipt or transfer number with the repayment', async () => {
+    const user = userEvent.setup();
     renderWithProviders(<DriversTab {...driverCashAccess('ACCOUNTANT')} userId="me" />);
-    await userEvent.setup().click(await screen.findByRole('button', { name: REPAY }));
-    expect(screen.getByLabelText('Receipt / transfer number')).toBeTruthy();
+    await user.click(await screen.findByRole('button', { name: REPAY }));
     expect(screen.getByText(/Each receipt can be used once/)).toBeTruthy();
+    await user.type(screen.getByLabelText('Amount (₪)'), '4');
+    await user.type(screen.getByLabelText('Receipt / transfer number'), 'rc-1001');
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    expect(vi.mocked(bff)).toHaveBeenCalledWith('/v1/admin/finance/driver-repayments', {
+      method: 'POST',
+      body: expect.objectContaining({ amount: '4', channel: 'HUB', receiptReference: 'rc-1001' }),
+      idempotencyKey: expect.any(String),
+    });
   });
 });

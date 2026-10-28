@@ -2,7 +2,7 @@
 // accounts and prices the smoke tests use. It never touches any other database.
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import argon2 from 'argon2';
 import { createPrismaClient } from '@coobra/database';
@@ -96,6 +96,11 @@ await db.pricingRule.create({
 await db.$disconnect();
 
 mkdirSync(new URL('./.auth/', import.meta.url), { recursive: true });
+// The isolated admin rewrites next-env.d.ts; global-setup.ts restores this copy after the run.
+const nextEnv = new URL('../../apps/admin-web/next-env.d.ts', import.meta.url);
+if (existsSync(nextEnv)) {
+  copyFileSync(nextEnv, new URL('./.auth/next-env.d.ts.backup', import.meta.url));
+}
 writeFileSync(
   new URL('./.auth/accounts.json', import.meta.url),
   JSON.stringify({ databaseUrl: url, zones: { ramallah }, accounts }, null, 2),

@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# Isolated end-to-end stack outputs (packages/e2e)
+.e2e-dist/
+.next-e2e/
 build/
 coverage/
 .turbo/

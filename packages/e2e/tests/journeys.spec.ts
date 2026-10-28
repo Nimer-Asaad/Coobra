@@ -179,3 +179,69 @@ test('a return is charged by the policy the shipment was priced with', async ({ 
   await expectBalancedLedger();
   await Promise.all([merchantApi.dispose(), opsApi.dispose(), driverApi.dispose()]);
 });
+
+test('only an accountant posts a driver repayment, once per receipt', async ({ browser }) => {
+  // Set-up: the driver owes 10 (a driver-liable cash shortage, approved by a second person).
+  const accountantApi = await apiAs('accountant2', 'ADMIN_WEB');
+  const adminApi = await apiAs('admin', 'ADMIN_WEB');
+  const shortage = await accountantApi.post('/v1/admin/finance/driver-shortages', {
+    data: {
+      driverId: accounts.driver.id,
+      amount: '10',
+      responsibility: 'DRIVER_LIABLE',
+      reason: 'E2E lost cash',
+    },
+  });
+  expect(shortage.status()).toBe(201);
+  const approved = await adminApi.post(
+    `/v1/admin/finance/driver-shortages/${((await shortage.json()) as { id: string }).id}/approve`,
+    { data: {}, headers: { 'idempotency-key': crypto.randomUUID() } },
+  );
+  expect(approved.status()).toBe(200);
+  const debt = `DRIVER_RECEIVABLE:${accounts.driver.id}`;
+  expect(await balance(debt)).toBe('10.00');
+
+  // The super admin cannot post one through the API either (not only a hidden button).
+  const forbidden = await adminApi.post('/v1/admin/finance/driver-repayments', {
+    data: { driverId: accounts.driver.id, amount: '1', channel: 'HUB', receiptReference: 'RC-9' },
+    headers: { 'idempotency-key': crypto.randomUUID() },
+  });
+  expect(forbidden.status()).toBe(403);
+
+  const repayInUi = async (name: 'accountant' | 'accountant2', receipt: string) => {
+    const page = await signInAdmin(browser, name);
+    await page.goto(`${URLS.admin}/finance`);
+    await page.getByRole('tab', { name: 'Driver cash' }).click();
+    await page.getByRole('button', { name: 'Record a driver repayment' }).click();
+    await page.getByRole('combobox', { name: 'Driver' }).selectOption(accounts.driver.id);
+    await page.getByLabel('Amount (₪)').fill('4');
+    await page.getByLabel('Receipt / transfer number').fill(receipt);
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+    return page;
+  };
+
+  // First accountant posts receipt RC-1001 (typed with Arabic digits and lower case).
+  const first = await repayInUi('accountant', 'rc-١٠٠١');
+  await expect(first.getByRole('status')).toHaveText('Saved.');
+  // A second accountant enters the same paper receipt: refused, nothing posted.
+  const second = await repayInUi('accountant2', 'RC-1001');
+  await expect(second.getByText('This payment reference was already used.')).toBeVisible();
+  // A separate payment of the same amount with its own receipt is accepted.
+  const third = await repayInUi('accountant2', 'RC-1002');
+  await expect(third.getByRole('status')).toHaveText('Saved.');
+
+  const repayments = await db.driverRepayment.findMany({
+    where: { driverId: accounts.driver.id },
+    orderBy: { createdAt: 'asc' },
+  });
+  expect(
+    repayments.map((row) => [row.receiptReference, row.amount.toFixed(2), row.recordedById]),
+  ).toEqual([
+    ['RC-1001', '4.00', accounts.accountant.id],
+    ['RC-1002', '4.00', accounts.accountant2.id],
+  ]);
+  expect(await db.journalEntry.count({ where: { kind: 'DRIVER_REPAYMENT' } })).toBe(2);
+  expect(await balance(debt)).toBe('2.00');
+  await expectBalancedLedger();
+  await Promise.all([accountantApi.dispose(), adminApi.dispose()]);
+});

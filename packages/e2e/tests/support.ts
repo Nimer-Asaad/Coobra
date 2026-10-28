@@ -7,13 +7,9 @@ import {
   type Page,
 } from '@playwright/test';
 import { createPrismaClient } from '@coobra/database';
+import { URLS } from './urls';
 
-export const URLS = {
-  api: 'http://localhost:4000',
-  admin: 'http://localhost:3000',
-  merchant: 'http://localhost:8082',
-  driver: 'http://localhost:8081',
-};
+export { URLS };
 
 type AccountName =
   | 'admin'

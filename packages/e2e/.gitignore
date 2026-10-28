@@ -1,3 +1,4 @@
 .auth/
 test-results/
 playwright-report/
+.web/

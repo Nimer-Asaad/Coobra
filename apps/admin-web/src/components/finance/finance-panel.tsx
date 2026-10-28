@@ -668,6 +668,7 @@ export function DriversTab({
                   driverId: text(form, 'driverId'),
                   amount: text(form, 'amount'),
                   channel: text(form, 'channel'),
+                  receiptReference: text(form, 'receiptReference'),
                   note: optional(form, 'note'),
                 })
               }
