@@ -13,7 +13,13 @@ import {
 } from '@coobra/shared';
 import { Errors } from '../common/app-exception.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { auditEntity, auditSummary, redactMetadata, splitChanges } from './audit-redaction.js';
+import {
+  auditEntity,
+  auditSummary,
+  looksSecret,
+  redactMetadata,
+  splitChanges,
+} from './audit-redaction.js';
 
 type Actor = { id: string; role: UserRole };
 
@@ -128,9 +134,11 @@ export class AuditLogService {
     } else if (query.entityType) {
       const key = AUDIT_ENTITY_KEYS[query.entityType];
       conditions.push(
-        query.entityId
-          ? Prisma.sql`a.metadata @> ${JSON.stringify({ [key]: query.entityId })}::jsonb`
-          : Prisma.sql`a.metadata ? ${key}`,
+        !query.entityId
+          ? Prisma.sql`a.metadata ? ${key}`
+          : looksSecret(query.entityId)
+            ? Prisma.sql`false`
+            : Prisma.sql`a.metadata @> ${JSON.stringify({ [key]: query.entityId })}::jsonb`,
       );
     }
     if (query.q) conditions.push(await this.search(query.q));
@@ -141,8 +149,11 @@ export class AuditLogService {
   /**
    * Search by what an administrator usually has at hand: an id (entry, person or entity), a
    * tracking number, a receipt/payment reference, or a person's name or email.
+   * A term that looks like a credential matches nothing: the viewer withholds such values, so
+   * a search (or its count) must not confirm them either.
    */
   private async search(q: string): Promise<Prisma.Sql> {
+    if (looksSecret(q)) return Prisma.sql`false`;
     const contains = (key: string, value: string) =>
       Prisma.sql`a.metadata @> ${JSON.stringify({ [key]: value })}::jsonb`;
     if (UUID_PATTERN.test(q)) {

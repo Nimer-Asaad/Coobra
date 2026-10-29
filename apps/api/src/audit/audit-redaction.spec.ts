@@ -94,6 +94,93 @@ describe('redactMetadata', () => {
     expect(redactMetadata([1, 2])).toEqual({ value: {}, redacted: ['metadata'] });
   });
 
+  it('withholds secrets inside arrays of objects and under the newer secret names', () => {
+    const { value, redacted } = redactMetadata({
+      after: {
+        items: [{ name: 'ok', apiKey: 'k1' }, { accessKey: 'k2' }, ['Bearer abcdefgh']],
+        pwd: 'p',
+        jwt: 'j',
+      },
+    });
+    expect(value.after).toEqual({
+      items: [{ name: 'ok', apiKey: REDACTED }, { accessKey: REDACTED }, [REDACTED]],
+      pwd: REDACTED,
+      jwt: REDACTED,
+    });
+    expect(redacted.sort()).toEqual(
+      [
+        'after.items[0].apiKey',
+        'after.items[1].accessKey',
+        'after.items[2][0]',
+        'after.pwd',
+        'after.jwt',
+      ].sort(),
+    );
+  });
+
+  it('never shows a key that is itself a secret, not even in the withheld list', () => {
+    const token = 'A1b2C3d4'.repeat(6);
+    const { value, redacted } = redactMetadata({
+      [token]: 'x',
+      changes: { [token]: { revoked: true }, ['k'.repeat(65)]: 1, fullName: 'Sami' },
+    });
+    const shown = JSON.stringify({ value, redacted });
+    expect(shown).not.toContain(token);
+    expect(shown).not.toContain('k'.repeat(65));
+    expect(value.changes).toEqual({ [REDACTED]: REDACTED, fullName: 'Sami' });
+    expect(redacted).toEqual([REDACTED, `changes.${REDACTED}`, `changes.${REDACTED}`]);
+  });
+
+  it('withholds both values of a setting whose key names a secret', () => {
+    const { value, redacted } = redactMetadata({
+      key: 'SMTP_PASSWORD',
+      oldValue: 'old-secret',
+      newValue: 'new-secret',
+    });
+    expect(value).toEqual({ key: 'SMTP_PASSWORD', oldValue: REDACTED, newValue: REDACTED });
+    expect(redacted).toEqual(['oldValue', 'newValue']);
+    expect(splitChanges(value).changes).toEqual([
+      { field: 'SMTP_PASSWORD', before: REDACTED, after: REDACTED },
+    ]);
+    // An ordinary setting keeps its values.
+    expect(
+      redactMetadata({ key: 'APPROVAL_THRESHOLD', oldValue: '100', newValue: '200' }).value,
+    ).toEqual({ key: 'APPROVAL_THRESHOLD', oldValue: '100', newValue: '200' });
+  });
+
+  it('withholds cards, IBANs, private keys and credentials inside text or URLs', () => {
+    const { value } = redactMetadata({
+      reference: '4111 1111 1111 1111',
+      code: 'PS92PALS000000000400123456702',
+      note: 'see -----BEGIN RSA PRIVATE KEY----- MIIE',
+      reason: 'reset via https://coobra.test/reset?token=abc123def456',
+      before: {
+        x: 'header was Bearer abcdefghijklmnopqrstuvwxyz',
+        y: 'Basic dXNlcjpwYXNzd29yZA==',
+        z: 'pasted eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig here',
+      },
+    });
+    expect(value).toEqual({
+      reference: REDACTED,
+      code: REDACTED,
+      note: REDACTED,
+      reason: REDACTED,
+      before: { x: REDACTED, y: REDACTED, z: REDACTED },
+    });
+  });
+
+  it('keeps phone numbers, amounts, tracking numbers and ordinary words', () => {
+    const kept = {
+      reference: '0599777888',
+      amount: '1234.50',
+      trackingNumber: 'CB-12345678',
+      code: 'RAMALLAH',
+      reason: 'The bearer of the parcel was absent',
+      note: '1234567890123', // 13 digits that fail the card check
+    };
+    expect(redactMetadata(kept)).toEqual({ value: kept, redacted: [] });
+  });
+
   it('allows no field whose name looks like a secret', () => {
     // A guard for future edits of the allowlist.
     const keys = Object.keys(

@@ -86,24 +86,50 @@ const ALLOWED_KEYS = new Set([
 ]);
 
 const SECRET_KEY =
-  /pass(word|wd|phrase)?|secret|token|cookie|authori[sz]ation|api[-_]?key|private[-_]?key|credential|hash|otp|signature|cvv|card[-_]?number|iban/i;
+  /pass(word|wd|phrase)?|pwd|secret|token|jwt|bearer|cookie|authori[sz]ation|(api|access|private)[-_]?key|credential|hash|otp|signature|cvv|card[-_]?number|iban/i;
 const SECRET_VALUE = [
   /^bearer\s/i,
-  /^eyJ[\w-]{5,}\.[\w-]{5,}\./, // JWT
+  /\bbearer\s+\S{16,}/i, // inside a sentence
+  /^basic\s+[A-Za-z0-9+/=]{8,}$/i,
+  /eyJ[\w-]{5,}\.[\w-]{5,}\./, // JWT, also inside a sentence
   /^\$(argon2|2[aby]?|scrypt|pbkdf2)/i, // password hashes
   /^[A-Za-z0-9_-]{40,}$/, // long opaque tokens (session and reset tokens are 43 chars)
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /[?&](token|key|secret|password|sig|signature|code)=[^&\s]{6,}/i, // secrets in a URL
+  /^[A-Z]{2}\d{2}(?: ?[A-Z0-9]){11,30}$/, // IBAN
 ];
 const MAX_DEPTH = 4;
 const MAX_ARRAY = 50;
 const MAX_STRING = 500;
+/** Longer keys are not field names but data (e.g. a map keyed by token). */
+const MAX_KEY = 64;
 
 export interface Redacted {
   value: Record<string, AuditValue>;
   redacted: string[];
 }
 
-function looksSecret(value: string): boolean {
-  return SECRET_VALUE.some((pattern) => pattern.test(value));
+/** Payment card numbers: 13 to 19 digits (spaces or dashes allowed) passing the Luhn check. */
+function looksLikeCard(value: string): boolean {
+  if (!/^\d[\d -]{11,22}\d$/.test(value)) return false;
+  const digits = value.replace(/[ -]/g, '');
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  for (let i = 0; i < digits.length; i += 1) {
+    let digit = Number(digits[digits.length - 1 - i]);
+    if (i % 2 === 1) digit = digit * 2 > 9 ? digit * 2 - 9 : digit * 2;
+    sum += digit;
+  }
+  return sum % 10 === 0;
+}
+
+export function looksSecret(value: string): boolean {
+  return SECRET_VALUE.some((pattern) => pattern.test(value)) || looksLikeCard(value);
+}
+
+/** A key that is itself a secret (or data) is not shown, not even in the withheld list. */
+function unsafeKey(key: string): boolean {
+  return key.length > MAX_KEY || looksSecret(key);
 }
 
 function clean(value: unknown, path: string, depth: number, redacted: string[]): AuditValue {
@@ -129,6 +155,11 @@ function clean(value: unknown, path: string, depth: number, redacted: string[]):
   if (typeof value === 'object') {
     const out: Record<string, AuditValue> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (unsafeKey(key)) {
+        redacted.push(`${path}.${REDACTED}`);
+        out[REDACTED] = REDACTED;
+        continue;
+      }
       const childPath = `${path}.${key}`;
       if (SECRET_KEY.test(key)) {
         redacted.push(childPath);
@@ -152,11 +183,23 @@ export function redactMetadata(metadata: unknown): Redacted {
     return { value, redacted: ['metadata'] };
   }
   for (const [key, item] of Object.entries(metadata as Record<string, unknown>)) {
-    if (!ALLOWED_KEYS.has(key) || SECRET_KEY.test(key)) {
+    if (unsafeKey(key)) {
+      redacted.push(REDACTED);
+      value[REDACTED] = REDACTED;
+    } else if (!ALLOWED_KEYS.has(key) || SECRET_KEY.test(key)) {
       redacted.push(key);
       value[key] = REDACTED;
     } else {
       value[key] = clean(item, key, 1, redacted);
+    }
+  }
+  // A setting change (key, oldValue, newValue) whose key names a secret: withhold both values.
+  if (typeof value.key === 'string' && SECRET_KEY.test(value.key)) {
+    for (const field of ['oldValue', 'newValue']) {
+      if (field in value && value[field] !== REDACTED) {
+        value[field] = REDACTED;
+        redacted.push(field);
+      }
     }
   }
   return { value, redacted };

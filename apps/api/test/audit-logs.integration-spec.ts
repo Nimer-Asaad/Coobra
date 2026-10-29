@@ -268,6 +268,44 @@ describe('Audit log viewer (PostgreSQL integration)', () => {
     await get(admin, '/v1/admin/audit-logs/not-a-uuid').expect(404);
   });
 
+  it('never confirms a withheld value through search, filters, counts or error responses', async () => {
+    const token = 'Zk3vQ9'.repeat(8);
+    const card = '4111111111111111';
+    await ctx.prisma.auditLog.create({
+      data: {
+        action: 'MERCHANT_PAYMENT_RECORDED',
+        actorUserId: accountant.id,
+        targetUserId: merchant.id,
+        metadata: {
+          paymentId: token,
+          reference: card,
+          [token]: { revoked: true },
+          after: { sessions: [{ id: 's1', refreshToken: token }] },
+        },
+      },
+    });
+    // The entry is listed, but nothing in the list or the detail carries the values.
+    const [entry] = (await list('?action=MERCHANT_PAYMENT_RECORDED')).items;
+    expect(entry).toMatchObject({ entity: { type: 'USER', id: merchant.id }, summary: null });
+    const detail = await get(admin, `/v1/admin/audit-logs/${entry!.id}`).expect(200);
+    const listText = (await get(admin, '/v1/admin/audit-logs?pageSize=100')).text;
+    for (const text of [detail.text, listText]) {
+      expect(text).not.toContain(token);
+      expect(text).not.toContain(card);
+    }
+    // Searching or filtering by a withheld value finds nothing, so the total confirms nothing.
+    for (const query of [
+      `?q=${token}`,
+      `?q=${card}`,
+      `?entityType=MERCHANT_PAYMENT&entityId=${token}`,
+    ]) {
+      expect(await list(query)).toMatchObject({ items: [], total: 0 });
+    }
+    // Validation errors name the field and a message key, never echo the input.
+    const rejected = await get(admin, `/v1/admin/audit-logs?actorId=${token}`).expect(400);
+    expect(rejected.text).not.toContain(token);
+  });
+
   it('applies the same redaction to the user history', async () => {
     const res = await get(admin, `/v1/admin/users/${ops.id}`).expect(200);
     for (const secret of SECRETS) expect(res.text).not.toContain(secret);
