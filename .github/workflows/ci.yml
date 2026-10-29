@@ -15,8 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  # A new push to a PR replaces its older run; runs on main always finish, one per merge.
+  # A new push to a PR replaces its older run. Every push to main gets a group of its own (the
+  # run id), so no merge's run is ever cancelled or dropped while pending behind another.
+  group: ${{ github.event_name == 'push' && format('ci-push-{0}', github.run_id) || format('ci-{0}', github.event.pull_request.number || github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
