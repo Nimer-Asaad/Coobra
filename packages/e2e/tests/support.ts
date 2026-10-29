@@ -70,14 +70,40 @@ async function chooseEnglishOnFirstVisit(page: Page, ready: Locator) {
   await expect(ready).toBeVisible();
 }
 
+/** Sign-ins are rate limited (10 a minute per client) and a full run signs in more often. */
+const RATE_LIMIT_WAIT_MS = 61_000;
+/** Never wait longer than this for a Retry-After, whatever the server says. */
+const RATE_LIMIT_MAX_WAIT_MS = 65_000;
+
+/**
+ * Submits the admin login form on the current page and returns the HTTP status of the sign-in.
+ * Only a 429 is waited out and retried, once; any other status is returned as it is, so an
+ * unexpected failure (wrong password, disabled account, server error) is never masked.
+ */
+export async function submitAdminLogin(page: Page, name: AccountName): Promise<number> {
+  const submit = async () => {
+    await page.locator('input[name="email"]').fill(accounts[name].email);
+    await page.locator('input[name="password"]').fill(accounts[name].password);
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (res) => res.url().endsWith('/api/session/login') && res.request().method() === 'POST',
+      ),
+      page.locator('input[name="password"]').press('Enter'),
+    ]);
+    return response.status();
+  };
+  const status = await submit();
+  if (status !== 429) return status;
+  await page.waitForTimeout(RATE_LIMIT_WAIT_MS);
+  return submit();
+}
+
 /** A fresh, isolated browser context per role (separate cookies and storage). */
 export async function signInAdmin(browser: Browser, name: AccountName): Promise<Page> {
   const page = await (await browser.newContext()).newPage();
   await page.goto(`${URLS.admin}/login`);
   await chooseEnglishOnFirstVisit(page, page.locator('input[name="email"]'));
-  await page.locator('input[name="email"]').fill(accounts[name].email);
-  await page.locator('input[name="password"]').fill(accounts[name].password);
-  await page.locator('input[name="password"]').press('Enter');
+  expect(await submitAdminLogin(page, name), `sign-in of ${name}`).toBe(200);
   await page.waitForURL(/\/dashboard/);
   return page;
 }
@@ -107,9 +133,10 @@ export async function apiAs(
   const data = { email: accounts[name].email, password: accounts[name].password, clientApp };
   let login = await anonymous.post('/v1/auth/login', { data });
   // Logins are rate limited per client (10 a minute); the whole run signs in more often.
+  // Only a 429 is retried, once, after at most RATE_LIMIT_MAX_WAIT_MS.
   if (login.status() === 429) {
-    const wait = Number(login.headers()['retry-after'] ?? 60);
-    await new Promise((resolve) => setTimeout(resolve, (wait + 1) * 1000));
+    const wait = (Number(login.headers()['retry-after']) || 60) * 1000 + 1000;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(wait, RATE_LIMIT_MAX_WAIT_MS)));
     login = await anonymous.post('/v1/auth/login', { data });
   }
   expect(login.status(), await login.text()).toBe(200);

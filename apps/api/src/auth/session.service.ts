@@ -28,9 +28,14 @@ export class SessionService {
       : this.config.session.mobileTtlMs;
   }
 
-  async create(userId: string, clientApp: ClientApp, meta: RequestMeta): Promise<CreatedSession> {
+  async create(
+    userId: string,
+    clientApp: ClientApp,
+    meta: RequestMeta,
+    tx: Prisma.TransactionClient = this.prisma.client,
+  ): Promise<CreatedSession> {
     const token = generateOpaqueToken();
-    const session = await this.prisma.client.session.create({
+    const session = await tx.session.create({
       data: {
         userId,
         clientApp,

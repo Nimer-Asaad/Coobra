@@ -37,7 +37,8 @@ const USER_ACTIONS = [
  * Administrative user management (SUPER_ADMIN only: the routes require it and every method
  * checks it again). Changes lock the user row and compare the version the administrator saw;
  * anything that can remove a super admin also locks every active super admin, so concurrent
- * changes can never leave the platform without one.
+ * changes can never leave the platform without one. The change, the session revocation and
+ * the audit entry commit in one transaction (a failed audit write rolls the change back).
  */
 @Injectable()
 export class UserAdminService {
@@ -153,11 +154,20 @@ export class UserAdminService {
     return user;
   }
 
-  /** Refuses to leave the platform without an active super admin (rows already locked). */
+  /**
+   * Refuses to leave the platform without a super admin who can sign in (rows already
+   * locked). An invited super admin who has not set a password yet does not count.
+   */
   private async assertAnotherActiveSuperAdmin(tx: Tx, user: User) {
     if (user.role !== 'SUPER_ADMIN' || user.status !== 'ACTIVE') return;
     const others = await tx.user.count({
-      where: { role: 'SUPER_ADMIN', status: 'ACTIVE', id: { not: user.id } },
+      where: {
+        role: 'SUPER_ADMIN',
+        status: 'ACTIVE',
+        passwordHash: { not: null },
+        emailVerifiedAt: { not: null },
+        id: { not: user.id },
+      },
     });
     if (others === 0) throw Errors.lastSuperAdmin();
   }
@@ -169,7 +179,7 @@ export class UserAdminService {
     meta: RequestMeta,
   ): Promise<UserDetails> {
     this.assertSuperAdmin(actor);
-    const changes = await this.prisma.client.$transaction(async (tx) => {
+    await this.prisma.client.$transaction(async (tx) => {
       const user = await this.lockTarget(tx, id, input.expectedUpdatedAt);
       const profile = await tx.merchantProfile.findUnique({ where: { userId: id } });
       if (input.businessName !== undefined && !profile) {
@@ -187,7 +197,7 @@ export class UserAdminService {
       track('phone', user.phone, phone);
       track('language', user.language, input.language);
       track('businessName', profile?.businessName ?? null, input.businessName);
-      if (Object.keys(after).length === 0) return null;
+      if (Object.keys(after).length === 0) return;
       await tx.user.update({
         where: { id },
         data: {
@@ -204,17 +214,14 @@ export class UserAdminService {
         // The profile lives in another table: bump the user version too.
         await tx.user.update({ where: { id }, data: { updatedAt: new Date() } });
       }
-      return { before, after };
-    });
-    if (changes) {
-      await this.audit.record({
+      await this.audit.recordIn(tx, {
         action: 'USER_PROFILE_UPDATED',
         actorUserId: actor.id,
         targetUserId: id,
         meta,
-        metadata: changes,
+        metadata: { before, after },
       });
-    }
+    });
     return this.details(actor, id);
   }
 
@@ -227,7 +234,7 @@ export class UserAdminService {
   ): Promise<UserDetails> {
     this.assertSuperAdmin(actor);
     if (id === actor.id) throw Errors.userSelfChangeForbidden();
-    const result = await this.prisma.client.$transaction(async (tx) => {
+    await this.prisma.client.$transaction(async (tx) => {
       const user = await this.lockTarget(tx, id, input.expectedUpdatedAt);
       const target = active ? 'ACTIVE' : 'DISABLED';
       if (user.status === target) {
@@ -237,18 +244,13 @@ export class UserAdminService {
       await tx.user.update({ where: { id }, data: { status: target } });
       // A deactivated account is signed out everywhere at once.
       const sessionsRevoked = active ? 0 : await this.sessions.revokeAllForUser(id, tx);
-      return { role: user.role, sessionsRevoked };
-    });
-    await this.audit.record({
-      action: active ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
-      actorUserId: actor.id,
-      targetUserId: id,
-      meta,
-      metadata: {
-        reason: input.reason,
-        role: result.role,
-        sessionsRevoked: result.sessionsRevoked,
-      },
+      await this.audit.recordIn(tx, {
+        action: active ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
+        actorUserId: actor.id,
+        targetUserId: id,
+        meta,
+        metadata: { reason: input.reason, role: user.role, sessionsRevoked },
+      });
     });
     return this.details(actor, id);
   }
@@ -261,7 +263,7 @@ export class UserAdminService {
   ): Promise<UserDetails> {
     this.assertSuperAdmin(actor);
     if (id === actor.id) throw Errors.userSelfChangeForbidden();
-    const result = await this.prisma.client.$transaction(async (tx) => {
+    await this.prisma.client.$transaction(async (tx) => {
       const user = await this.lockTarget(tx, id, input.expectedUpdatedAt);
       if (!isRoleChangeable(user.role)) throw Errors.userRoleNotChangeable();
       if (user.role === input.role) throw Errors.invalidState('The user already has this role');
@@ -269,19 +271,13 @@ export class UserAdminService {
       await tx.user.update({ where: { id }, data: { role: input.role } });
       // New permissions apply from a fresh sign-in.
       const sessionsRevoked = await this.sessions.revokeAllForUser(id, tx);
-      return { from: user.role, sessionsRevoked };
-    });
-    await this.audit.record({
-      action: 'USER_ROLE_CHANGED',
-      actorUserId: actor.id,
-      targetUserId: id,
-      meta,
-      metadata: {
-        from: result.from,
-        to: input.role,
-        reason: input.reason,
-        sessionsRevoked: result.sessionsRevoked,
-      },
+      await this.audit.recordIn(tx, {
+        action: 'USER_ROLE_CHANGED',
+        actorUserId: actor.id,
+        targetUserId: id,
+        meta,
+        metadata: { from: user.role, to: input.role, reason: input.reason, sessionsRevoked },
+      });
     });
     return this.details(actor, id);
   }

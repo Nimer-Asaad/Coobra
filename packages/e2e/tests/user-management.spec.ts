@@ -1,15 +1,9 @@
-import { expect, test, type Page } from '@playwright/test';
-import { accounts, apiAs, db, signInAdmin, URLS } from './support';
+import { expect, test } from '@playwright/test';
+import { accounts, apiAs, db, signInAdmin, submitAdminLogin, URLS } from './support';
 
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-async function submitLogin(page: Page, name: 'viewer') {
-  await page.locator('input[name="email"]').fill(accounts[name].email);
-  await page.locator('input[name="password"]').fill(accounts[name].password);
-  await page.locator('input[name="password"]').press('Enter');
-}
 
 test('a super admin deactivates a user, who is signed out until reactivated', async ({
   browser,
@@ -41,7 +35,7 @@ test('a super admin deactivates a user, who is signed out until reactivated', as
   // The viewer's session is gone and the account cannot sign in.
   await viewer.goto(`${URLS.admin}/dashboard`);
   await viewer.waitForURL(/\/login/);
-  await submitLogin(viewer, 'viewer');
+  expect(await submitAdminLogin(viewer, 'viewer')).toBe(403);
   await expect(viewer.getByText('This account has been disabled. Contact support.')).toBeVisible();
 
   // Reactivated: the same password works again.
@@ -52,14 +46,7 @@ test('a super admin deactivates a user, who is signed out until reactivated', as
     .fill('E2E: rehired');
   await admin.getByRole('dialog').getByRole('button', { name: 'Reactivate account' }).click();
   await expect(admin.getByRole('status')).toHaveText('Account reactivated.');
-  await submitLogin(viewer, 'viewer');
-  // Sign-ins are rate limited (10 a minute) and this run signs in often: wait it out once.
-  const limited = viewer.getByText('Too many attempts', { exact: false });
-  await expect(limited.or(viewer.getByRole('link', { name: 'Dashboard' })).first()).toBeVisible();
-  if (await limited.isVisible()) {
-    await viewer.waitForTimeout(61_000);
-    await submitLogin(viewer, 'viewer');
-  }
+  expect(await submitAdminLogin(viewer, 'viewer')).toBe(200);
   await viewer.waitForURL(/\/dashboard/);
 
   // Both changes are in the audit log and shown in the account history.

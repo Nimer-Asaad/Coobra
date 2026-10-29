@@ -1,8 +1,10 @@
 import request from 'supertest';
 import type { Server as App } from 'node:http';
 import type { Paginated, UserDetails, UserListItem } from '@coobra/shared';
+import { AuditService } from '../src/audit/audit.service.js';
 import { UserAdminService } from '../src/users/user-admin.service.js';
 import {
+  ALLOWED_ORIGIN,
   createSignedInUser,
   createTestApp,
   resetDatabase,
@@ -31,6 +33,16 @@ describe('User management (PostgreSQL integration)', () => {
   const details = async (id: string) =>
     (await api(admin).get(`/v1/admin/users/${id}`).expect(200)).body as UserDetails;
   const version = async (id: string) => (await details(id)).updatedAt;
+  /** Waits until some query is blocked on a row lock (polls pg_locks for up to ~5 s). */
+  const waitForBlockedLock = async () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const rows = await ctx.prisma.$queryRaw<{ waiting: number }[]>`
+        SELECT count(*)::int AS waiting FROM pg_locks WHERE NOT granted`;
+      if ((rows[0]?.waiting ?? 0) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('Nothing waited for the lock');
+  };
   const signIn = (email: string, clientApp = 'ADMIN_WEB') =>
     request(server()).post('/v1/auth/login').send({ email, password: TEST_PASSWORD, clientApp });
 
@@ -381,6 +393,175 @@ describe('User management (PostgreSQL integration)', () => {
           expectedUpdatedAt: remaining.updatedAt.toISOString(),
         },
         meta,
+      ),
+    ).rejects.toMatchObject({ code: 'LAST_SUPER_ADMIN' });
+  });
+
+  it('rejects every old session, bearer or cookie, on every route, even after reactivation', async () => {
+    const cookieLogin = async (email: string) => {
+      const res = await request(server())
+        .post('/v1/auth/login')
+        .set('x-auth-transport', 'cookie')
+        .send({ email, password: TEST_PASSWORD, clientApp: 'ADMIN_WEB' })
+        .expect(200);
+      return String(res.headers['set-cookie']).split(';')[0]!;
+    };
+    const withCookie = (cookie: string) => ({
+      get: (path: string) => request(server()).get(path).set('Cookie', cookie),
+      patch: (path: string, body: object) =>
+        request(server())
+          .patch(path)
+          .set('Cookie', cookie)
+          .set('Origin', ALLOWED_ORIGIN)
+          .send(body),
+    });
+    const opsCookie = await cookieLogin('ops@example.com');
+    await withCookie(opsCookie).get('/v1/admin/shipments').expect(200);
+
+    await api(admin)
+      .post(`/v1/admin/users/${ops.id}/deactivate`, {
+        reason: 'Suspended',
+        expectedUpdatedAt: await version(ops.id),
+      })
+      .expect(200);
+    for (const path of ['/v1/auth/me', '/v1/admin/shipments', '/v1/admin/drivers']) {
+      await api(ops).get(path).expect(401);
+      await withCookie(opsCookie).get(path).expect(401);
+    }
+    await withCookie(opsCookie).patch('/v1/me/preferences', { language: 'ar' }).expect(401);
+
+    // Reactivation does not bring the old sessions back: only a new sign-in works.
+    await api(admin)
+      .post(`/v1/admin/users/${ops.id}/reactivate`, {
+        reason: 'Back',
+        expectedUpdatedAt: await version(ops.id),
+      })
+      .expect(200);
+    await api(ops).get('/v1/auth/me').expect(401);
+    await withCookie(opsCookie).get('/v1/auth/me').expect(401);
+    await withCookie(await cookieLogin('ops@example.com'))
+      .get('/v1/auth/me')
+      .expect(200);
+
+    // A role change ends cookie sessions too.
+    const accountantCookie = await cookieLogin('acc@example.com');
+    await api(admin)
+      .post(`/v1/admin/users/${accountant.id}/role`, {
+        role: 'OWNER_VIEWER',
+        reason: 'Read only now',
+        expectedUpdatedAt: await version(accountant.id),
+      })
+      .expect(200);
+    await withCookie(accountantCookie).get('/v1/admin/shipments').expect(401);
+    await api(accountant).get('/v1/admin/shipments').expect(401);
+  });
+
+  it('reads the status and role from the database on every request', async () => {
+    // Even without a revocation (e.g. a manual database fix), the guard sees the change.
+    await ctx.prisma.user.update({ where: { id: ops.id }, data: { status: 'DISABLED' } });
+    await api(ops).get('/v1/auth/me').expect(401);
+    await ctx.prisma.user.update({ where: { id: ops.id }, data: { status: 'ACTIVE' } });
+    await api(ops).get('/v1/auth/me').expect(200);
+
+    // Permissions come from the current role, not from what the session was opened with.
+    await api(admin2).get('/v1/admin/users').expect(200);
+    await ctx.prisma.user.update({ where: { id: admin2.id }, data: { role: 'OPERATIONS' } });
+    await api(admin2).get('/v1/admin/users').expect(403);
+    // A role that does not belong to the app closes the session.
+    await ctx.prisma.user.update({ where: { id: admin2.id }, data: { role: 'DRIVER' } });
+    await api(admin2).get('/v1/auth/me').expect(401);
+  });
+
+  it('never opens a session that races a deactivation', async () => {
+    // An administrator's change holds the user row while the user signs in.
+    let login: Promise<request.Response> | undefined;
+    await ctx.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${ops.id}::uuid FOR UPDATE`;
+        login = signIn('ops@example.com').then((res) => res);
+        // Wait until the sign-in is blocked on the row lock (past its own status check).
+        await waitForBlockedLock();
+        await tx.user.update({ where: { id: ops.id }, data: { status: 'DISABLED' } });
+        await tx.session.updateMany({
+          where: { userId: ops.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      },
+      { timeout: 20_000 },
+    );
+    const res = await login!;
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('AUTH_ACCOUNT_DISABLED');
+    expect(await ctx.prisma.session.count({ where: { userId: ops.id, revokedAt: null } })).toBe(0);
+  });
+
+  it('returns the role a racing sign-in actually gets', async () => {
+    let login: Promise<request.Response> | undefined;
+    await ctx.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${ops.id}::uuid FOR UPDATE`;
+        login = signIn('ops@example.com').then((res) => res);
+        await waitForBlockedLock();
+        await tx.user.update({ where: { id: ops.id }, data: { role: 'ACCOUNTANT' } });
+        await tx.session.updateMany({
+          where: { userId: ops.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      },
+      { timeout: 20_000 },
+    );
+    const res = await login!;
+    expect(res.status).toBe(200);
+    // The new session was opened after the change, with the new role.
+    expect(res.body.user.role).toBe('ACCOUNTANT');
+    const open = await ctx.prisma.session.findMany({ where: { userId: ops.id, revokedAt: null } });
+    expect(open).toHaveLength(1);
+  });
+
+  it('rolls the change back when its audit entry cannot be written', async () => {
+    const audit = ctx.app.get(AuditService);
+    const spy = vi.spyOn(audit, 'recordIn').mockRejectedValueOnce(new Error('audit down'));
+    try {
+      await api(admin)
+        .post(`/v1/admin/users/${ops.id}/deactivate`, {
+          reason: 'Suspended',
+          expectedUpdatedAt: await version(ops.id),
+        })
+        .expect(500);
+    } finally {
+      spy.mockRestore();
+    }
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { id: ops.id } });
+    expect(user.status).toBe('ACTIVE');
+    await api(ops).get('/v1/auth/me').expect(200);
+    expect(await ctx.prisma.auditLog.count({ where: { action: 'USER_DEACTIVATED' } })).toBe(0);
+  });
+
+  it('does not count an invited super admin who cannot sign in yet', async () => {
+    await ctx.prisma.user.create({
+      data: {
+        email: 'invited@example.com',
+        fullName: 'Invited Admin',
+        role: 'SUPER_ADMIN',
+        language: 'en',
+      },
+    });
+    await api(admin)
+      .post(`/v1/admin/users/${admin2.id}/deactivate`, {
+        reason: 'Left',
+        expectedUpdatedAt: await version(admin2.id),
+      })
+      .expect(200);
+    const service = ctx.app.get(UserAdminService);
+    const outsider = { id: '0199a1c2-7d3e-7f00-8000-00000000abcd', role: 'SUPER_ADMIN' as const };
+    const current = await ctx.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
+    await expect(
+      service.setActive(
+        outsider,
+        admin.id,
+        false,
+        { reason: 'Test', expectedUpdatedAt: current.updatedAt.toISOString() },
+        { ipAddress: null, userAgent: null },
       ),
     ).rejects.toMatchObject({ code: 'LAST_SUPER_ADMIN' });
   });
