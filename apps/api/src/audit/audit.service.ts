@@ -13,6 +13,10 @@ export type AuditAction =
   | 'AUTH_EMAIL_VERIFIED'
   | 'USER_CREATED'
   | 'USER_PREFERENCES_UPDATED'
+  | 'USER_PROFILE_UPDATED'
+  | 'USER_DEACTIVATED'
+  | 'USER_REACTIVATED'
+  | 'USER_ROLE_CHANGED'
   | 'SHIPMENT_CREATED'
   | 'SHIPMENT_ASSIGNED'
   | 'SHIPMENT_STATUS_CHANGED'
@@ -79,18 +83,26 @@ export class AuditService {
   /** Writes an audit entry. Failures are logged but never break the user's request. */
   async record(entry: AuditEntry): Promise<void> {
     try {
-      await this.prisma.client.auditLog.create({
-        data: {
-          action: entry.action,
-          actorUserId: entry.actorUserId ?? null,
-          targetUserId: entry.targetUserId ?? null,
-          ipAddress: entry.meta?.ipAddress ?? null,
-          userAgent: entry.meta?.userAgent ?? null,
-          metadata: entry.metadata,
-        },
-      });
+      await this.recordIn(this.prisma.client, entry);
     } catch (error) {
       this.logger.error(`Failed to write audit log ${entry.action}`, error as Error);
     }
+  }
+
+  /**
+   * Writes an audit entry inside the caller's transaction: the change and its audit entry
+   * commit together, and a failed write rolls the change back.
+   */
+  async recordIn(tx: Prisma.TransactionClient, entry: AuditEntry): Promise<void> {
+    await tx.auditLog.create({
+      data: {
+        action: entry.action,
+        actorUserId: entry.actorUserId ?? null,
+        targetUserId: entry.targetUserId ?? null,
+        ipAddress: entry.meta?.ipAddress ?? null,
+        userAgent: entry.meta?.userAgent ?? null,
+        metadata: entry.metadata,
+      },
+    });
   }
 }

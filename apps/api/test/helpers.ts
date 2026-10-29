@@ -151,7 +151,7 @@ export interface TestUser {
   token: string;
 }
 
-const TEST_PASSWORD = 'test-password-123';
+export const TEST_PASSWORD = 'test-password-123';
 let passwordHash: string | undefined;
 
 /** Inserts an active, verified user of any role and signs them in to their app (Bearer token). */

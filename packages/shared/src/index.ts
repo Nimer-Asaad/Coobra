@@ -6,3 +6,4 @@ export * from './api-types.js';
 export * from './shipments.js';
 export * from './pricing.js';
 export * from './finance.js';
+export * from './users.js';

@@ -28,9 +28,14 @@ export class SessionService {
       : this.config.session.mobileTtlMs;
   }
 
-  async create(userId: string, clientApp: ClientApp, meta: RequestMeta): Promise<CreatedSession> {
+  async create(
+    userId: string,
+    clientApp: ClientApp,
+    meta: RequestMeta,
+    tx: Prisma.TransactionClient = this.prisma.client,
+  ): Promise<CreatedSession> {
     const token = generateOpaqueToken();
-    const session = await this.prisma.client.session.create({
+    const session = await tx.session.create({
       data: {
         userId,
         clientApp,
@@ -75,10 +80,15 @@ export class SessionService {
     });
   }
 
-  async revokeAllForUser(userId: string, tx: Prisma.TransactionClient = this.prisma.client) {
-    await tx.session.updateMany({
+  /** Revokes every open session of the user; returns how many were open. */
+  async revokeAllForUser(
+    userId: string,
+    tx: Prisma.TransactionClient = this.prisma.client,
+  ): Promise<number> {
+    const result = await tx.session.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    return result.count;
   }
 }

@@ -34,7 +34,7 @@ const loginPasswordSchema = z
   .min(1, { error: 'validation.required' })
   .max(PASSWORD_MAX_LENGTH, { error: 'validation.password.tooLong' });
 
-const nameSchema = z
+export const nameSchema = z
   .string({ error: 'validation.required' })
   .trim()
   .min(2, { error: 'validation.name.tooShort' })

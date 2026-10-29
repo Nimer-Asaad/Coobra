@@ -10,8 +10,6 @@ import { MailService } from '../mail/mail.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { UserWithProfile } from './user.mapper.js';
 
-const LIST_LIMIT = 100;
-
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -37,10 +35,6 @@ export class UsersService {
       metadata: { language },
     });
     return updated;
-  }
-
-  list(): Promise<User[]> {
-    return this.prisma.client.user.findMany({ orderBy: { createdAt: 'desc' }, take: LIST_LIMIT });
   }
 
   /**

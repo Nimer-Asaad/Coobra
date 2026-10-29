@@ -130,6 +130,30 @@ export const Errors = {
       'The fee can no longer be changed directly in the current shipment status',
     ),
   conflict: (message: string) => new AppException(HttpStatus.CONFLICT, 'CONFLICT', message),
+  userSelfChangeForbidden: () =>
+    new AppException(
+      HttpStatus.FORBIDDEN,
+      'USER_SELF_CHANGE_FORBIDDEN',
+      'You cannot deactivate your own account or change your own role',
+    ),
+  lastSuperAdmin: () =>
+    new AppException(
+      HttpStatus.CONFLICT,
+      'LAST_SUPER_ADMIN',
+      'The last active super admin cannot be deactivated or demoted',
+    ),
+  userRoleNotChangeable: () =>
+    new AppException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'USER_ROLE_NOT_CHANGEABLE',
+      'Only staff roles can be changed; drivers and merchants keep their role',
+    ),
+  userChanged: () =>
+    new AppException(
+      HttpStatus.CONFLICT,
+      'USER_CHANGED',
+      'This user was changed by someone else; reload and try again',
+    ),
   selfApprovalForbidden: () =>
     new AppException(
       HttpStatus.FORBIDDEN,

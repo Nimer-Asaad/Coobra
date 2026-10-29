@@ -124,7 +124,21 @@ export class AuthService {
       });
     }
 
-    const session = await this.sessions.create(user.id, input.clientApp, meta);
+    // A deactivation or role change in progress holds the user row: wait for it and check
+    // again, so a session is never created after the change has revoked the user's sessions.
+    const { current, session } = await this.prisma.client.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR SHARE`;
+      const fresh = await tx.user.findUniqueOrThrow({
+        where: { id: user.id },
+        include: { merchantProfile: true },
+      });
+      if (fresh.status !== 'ACTIVE') throw Errors.accountDisabled();
+      if (!isRoleAllowedForApp(fresh.role, input.clientApp)) throw Errors.roleNotAllowedForApp();
+      return {
+        current: fresh,
+        session: await this.sessions.create(user.id, input.clientApp, meta, tx),
+      };
+    });
     await this.audit.record({
       action: 'AUTH_LOGIN_SUCCEEDED',
       actorUserId: user.id,
@@ -132,7 +146,7 @@ export class AuthService {
       meta,
       metadata: { clientApp: input.clientApp, sessionId: session.session.id },
     });
-    return { user, ...session };
+    return { user: current, ...session };
   }
 
   async logout(userId: string, sessionId: string, meta: RequestMeta): Promise<void> {

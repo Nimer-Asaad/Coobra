@@ -48,10 +48,14 @@ export interface UserListItem {
   id: string;
   email: string;
   fullName: string;
+  phone: string | null;
   role: UserRole;
   status: UserStatus;
   emailVerified: boolean;
+  /** Merchants only. */
+  businessName: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface HealthResponse {
