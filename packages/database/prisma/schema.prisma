@@ -185,6 +185,11 @@ model AuditLog {
   @@index([actorUserId])
   @@index([targetUserId])
   @@index([action, createdAt])
+  // Audit log viewer: newest-first pages, per-person history and entity lookups (metadata @>).
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([targetUserId, createdAt(sort: Desc)])
+  @@index([metadata(ops: JsonbOps)], type: Gin)
   @@map("audit_logs")
 }
 
