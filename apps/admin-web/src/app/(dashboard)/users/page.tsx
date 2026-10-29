@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 import { UsersPanel } from '@/components/dashboard/users-panel';
 import { Alert } from '@/components/ui/alert';
 import { getCurrentSession } from '@/lib/api-server';
@@ -11,5 +12,9 @@ export default async function UsersPage() {
     const { t } = await getServerT();
     return <Alert variant="destructive">{t('errors.FORBIDDEN')}</Alert>;
   }
-  return <UsersPanel />;
+  return (
+    <Suspense>
+      <UsersPanel />
+    </Suspense>
+  );
 }
