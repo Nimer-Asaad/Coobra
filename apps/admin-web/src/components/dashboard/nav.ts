@@ -15,6 +15,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/pricing', labelKey: 'nav.pricing', roles: SHIPMENT_VIEWER_ROLES },
   { href: '/zones', labelKey: 'nav.zones', roles: SHIPMENT_VIEWER_ROLES },
   { href: '/users', labelKey: 'nav.users', roles: ['SUPER_ADMIN'] },
+  { href: '/audit', labelKey: 'nav.audit', roles: ['SUPER_ADMIN'] },
   { href: '/settings', labelKey: 'nav.settings' },
 ];
 

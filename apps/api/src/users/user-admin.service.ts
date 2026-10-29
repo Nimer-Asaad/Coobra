@@ -11,6 +11,7 @@ import {
   type UserListItem,
   type UserRole,
 } from '@coobra/shared';
+import { redactMetadata } from '../audit/audit-redaction.js';
 import { AuditService } from '../audit/audit.service.js';
 import { SessionService } from '../auth/session.service.js';
 import { Errors } from '../common/app-exception.js';
@@ -126,7 +127,8 @@ export class UserAdminService {
         action: entry.action,
         actor: entry.actor,
         createdAt: entry.createdAt.toISOString(),
-        metadata: (entry.metadata as Record<string, unknown> | null) ?? null,
+        // The same redaction as the audit log viewer.
+        metadata: redactMetadata(entry.metadata).value,
       })),
     };
   }
