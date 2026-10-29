@@ -75,10 +75,15 @@ export class SessionService {
     });
   }
 
-  async revokeAllForUser(userId: string, tx: Prisma.TransactionClient = this.prisma.client) {
-    await tx.session.updateMany({
+  /** Revokes every open session of the user; returns how many were open. */
+  async revokeAllForUser(
+    userId: string,
+    tx: Prisma.TransactionClient = this.prisma.client,
+  ): Promise<number> {
+    const result = await tx.session.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    return result.count;
   }
 }
