@@ -6,6 +6,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Every merge to main runs the same checks on the merge commit.
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +16,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A new push to a PR replaces its older run; runs on main always finish, one per merge.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
