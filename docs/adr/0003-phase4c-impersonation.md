@@ -738,8 +738,8 @@ the URL` runs close to Vitest's 5-second limit under a fully parallel run and al
 | 4C.0  | This ADR and the revised `docs/impersonation.md`                                          | Done; owner approved on 2026-10-30                                           |
 | 4C.1  | Migration 14, shared contracts, route classification, route-coverage and schema tests     | Done; approved at `1b7c0ab`; applied to the local development database (§17) |
 | 4C.2  | `ActingContext` and request context everywhere; impersonation not yet possible            | Done; approved at `bfd1b21` (§18)                                            |
-| 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | **Done; awaiting owner review** (§19)                                        |
-| 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | Conflict-of-interest and financial-invariant tests                           |
+| 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | Done; approved at `de7506b` (§19, §20)                                       |
+| 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | **Done; awaiting owner review** (§21)                                        |
 | 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | UI tests in Arabic and English                                               |
 | 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | Owner reviews the PR                                                         |
 
@@ -891,3 +891,49 @@ bearer values, cookies, secret fields and long opaque tokens from error text, in
 error messages that print query arguments. A test captures the process output across a whole
 lifecycle with failures and finds none of the secrets. The development-only log mail transport
 prints email links and is refused in production by configuration.
+
+## 21. Phase 4C.4 record (2026-10-30)
+
+**Impersonated operational writes, off by default.** `IMPERSONATION_WRITES_ENABLED` defaults to
+`false` in every environment; it is enabled only in the isolated test app. When it is on, it also
+needs a valid key ring (`CONSEQUENCE_SIGNING_KEYS` as `<kid>:<base64url secret ≥ 32 bytes>`, with
+`CONSEQUENCE_SIGNING_ACTIVE_KEY`) and, in production, the R4 deployment; otherwise impersonated
+writes fail closed. Key ids allow rotation (old keys verify, the active key signs). No key is ever
+committed, logged or returned; configuration problems name settings only. No migration was added.
+
+**Exact matrix (with writes enabled).** Open: merchant shipment creation (fee confirmation), the
+merchant price quote, merchant `CREATED → CANCELLED` (reason) and `DELIVERY_FAILED →
+RETURN_REQUESTED` (reason + confirmation), driver `PICKED_UP`, `OUT_FOR_DELIVERY`, re-attempt
+(reason), `DELIVERY_FAILED`, `RETURN_IN_TRANSIT`, `RETURNED_TO_HUB` (reason + confirmation), plus
+logout and End. Every other write is refused, including `DELIVERED`, the driver's `RETURNED`,
+COD collection, settlements, payouts, payout cancellation, shortfall responses, pickup-zone
+changes, preferences and every staff route. Three impersonation-only GET previews were added
+(`/v1/merchant/shipment-consequences`, `/v1/{merchant,driver}/shipments/:id/consequences`).
+
+**Inside every permitted write transaction**, in the fixed lock order users → impersonation →
+shipment → return record: impersonation, actor, admin session and target re-validated after the
+locks are granted, with the clock at that moment (an end or an expiry while waiting refuses the
+write); the per-transition policy, the mandatory reason and the confirmation are checked; the
+admin is recorded in every "done by" column, the impersonation on the shipment, history, return
+record and quote (database composite keys enforce the actor), and the audit entry (with the
+effective account) is written in the same transaction, so a failed audit rolls the write back.
+
+**Confirmation (R2).** HMAC-SHA256 token over canonical JSON binding the impersonation, admin,
+account, action, shipment id/version/status (or the create inputs), pricing rule and version,
+fees, return policy, return record state, failed attempts and the charge lines; valid 5 minutes;
+verified by recomputing inside the write transaction. Missing → 400, any change → 409. Quotes are
+bound to the context that created them, in both directions.
+
+**Conflicts (R1, §10.4).** Enforced in each decision's transaction against the real actor: return
+approval, staff `RETURNED`, return fee set/waive, fee override, fee correction request and
+decision, shortfall propose/approve/reject, and adjustment approve/reject (linked: no involvement
+in the source; `UNLINKED` or unresolvable: a reviewer who never impersonated the merchant).
+Existing maker-checker, threshold and accountant-only rules run first and are unchanged.
+
+**Validation.** `impersonation-writes.integration-spec.ts` (20 tests) covers the exact matrix with
+writes enabled, attribution, confirmations (missing, tampered, mismatched, expired, fee or rule
+changed), quote binding, both outcomes of end-versus-write, expiry while waiting, racing
+transitions, deactivation racing a write without deadlock, audit-failure rollback, writes
+disabled, R1 after the end, fee override, adjustment independence and provenance validation, and
+unchanged normal behaviour, with every ledger and money table unchanged. Unit tests cover the key
+ring and the signer (tamper, unknown key, expiry, rotation, canonical form).

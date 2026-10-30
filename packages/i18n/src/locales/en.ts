@@ -983,6 +983,7 @@ export const en = {
     },
     date: { invalid: 'Enter a valid date.', order: 'The end date must be after the start date.' },
     finance: {
+      adjustmentSource: 'Link this adjustment to the shipment or posting it corrects.',
       resolution: 'Choose how the shortfall is resolved.',
       adjustmentType: 'Choose credit or debit.',
       sameFee: 'The new fee is the same as the current fee.',

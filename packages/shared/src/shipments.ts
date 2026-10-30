@@ -305,6 +305,8 @@ export const createShipmentSchema = z.object({
   destinationZoneId: z.uuid({ error: 'validation.zone.required' }),
   /** The quote shown to the merchant; rejected if expired, used or no longer accurate. */
   quoteId: z.uuid({ error: 'validation.quote.invalid' }).optional(),
+  /** ADR 0003 R2: only used (and then required) while a SUPER_ADMIN acts as the merchant. */
+  confirmationToken: z.string().min(16).max(4096).optional(),
   /** Optional locality detail; defaults to the destination zone name. */
   city: optionalText(80),
   addressLine: text(300),
@@ -320,7 +322,7 @@ export type CreateShipmentInput = z.infer<typeof createShipmentSchema>;
  * manual fee is an override and needs a reason.
  */
 export const adminCreateShipmentSchema = createShipmentSchema
-  .omit({ quoteId: true })
+  .omit({ quoteId: true, confirmationToken: true })
   .extend({
     merchantId: z.uuid({ error: 'validation.merchant.required' }),
     /** Staff only; defaults to the merchant's approved pickup zone. */
@@ -368,6 +370,8 @@ export const transitionShipmentSchema = z.object({
   toStatus: z.enum(SHIPMENT_STATUSES, { error: 'validation.status.invalid' }),
   reason: optionalText(500),
   cod: codConfirmationSchema.optional(),
+  /** ADR 0003 R2: only used (and then required) for impersonated transitions with a charge. */
+  confirmationToken: z.string().min(16).max(4096).optional(),
 });
 export type TransitionShipmentInput = z.infer<typeof transitionShipmentSchema>;
 /** What a client sends (optional fields may be omitted). */

@@ -22,6 +22,11 @@ import {
   type ShipmentListItem,
   type ShipmentSummary,
   type TransitionShipmentInput,
+  createConsequencesQuerySchema,
+  transitionConsequencesQuerySchema,
+  type ConsequencePreview,
+  type CreateConsequencesQuery,
+  type TransitionConsequencesQuery,
 } from '@coobra/shared';
 import { Auth, Meta, Roles } from '../common/decorators.js';
 import type { RequestAuth, RequestMeta } from '../common/request.js';
@@ -127,6 +132,17 @@ export class AdminShipmentsController {
 export class MerchantShipmentsController {
   constructor(private readonly shipments: ShipmentsService) {}
 
+  /** Impersonation only (ADR 0003 R2): the charges a transition can lead to, signed. */
+  @Get(':id/consequences')
+  consequences(
+    @Auth() auth: RequestAuth,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(transitionConsequencesQuerySchema))
+    query: TransitionConsequencesQuery,
+  ): Promise<ConsequencePreview> {
+    return this.shipments.previewTransition(auth.acting, id, query.toStatus);
+  }
+
   @Get()
   list(
     @Auth() auth: RequestAuth,
@@ -168,6 +184,17 @@ export class MerchantShipmentsController {
 export class DriverShipmentsController {
   constructor(private readonly shipments: ShipmentsService) {}
 
+  /** Impersonation only (ADR 0003 R2): the charges a transition can lead to, signed. */
+  @Get(':id/consequences')
+  consequences(
+    @Auth() auth: RequestAuth,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(transitionConsequencesQuerySchema))
+    query: TransitionConsequencesQuery,
+  ): Promise<ConsequencePreview> {
+    return this.shipments.previewTransition(auth.acting, id, query.toStatus);
+  }
+
   @Get()
   list(
     @Auth() auth: RequestAuth,
@@ -190,5 +217,20 @@ export class DriverShipmentsController {
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
     return this.shipments.transition(auth.acting, id, body, meta);
+  }
+}
+
+/** Impersonation only (ADR 0003 R2): the charges a new shipment fixes, signed. */
+@Roles('MERCHANT')
+@Controller('merchant')
+export class MerchantConsequencesController {
+  constructor(private readonly shipments: ShipmentsService) {}
+
+  @Get('shipment-consequences')
+  consequences(
+    @Auth() auth: RequestAuth,
+    @Query(new ZodValidationPipe(createConsequencesQuerySchema)) query: CreateConsequencesQuery,
+  ): Promise<ConsequencePreview> {
+    return this.shipments.previewCreate(auth.acting, query);
   }
 }

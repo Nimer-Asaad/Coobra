@@ -972,6 +972,7 @@ export const ar: TranslationResource = {
     },
     date: { invalid: 'أدخل تاريخاً صحيحاً.', order: 'يجب أن يكون تاريخ الانتهاء بعد تاريخ البدء.' },
     finance: {
+      adjustmentSource: 'اربط هذه التسوية بالشحنة أو القيد الذي تصححه.',
       resolution: 'اختر طريقة معالجة النقص.',
       adjustmentType: 'اختر إضافة أو خصماً.',
       sameFee: 'الرسوم الجديدة مطابقة للرسوم الحالية.',

@@ -108,14 +108,40 @@ export type DecisionInput = z.infer<typeof decisionSchema>;
 export const rejectionSchema = z.object({ note: reasonTextSchema });
 export type RejectionInput = z.infer<typeof rejectionSchema>;
 
-export const adjustmentSchema = z.object({
-  type: z.enum(['MERCHANT_CREDIT', 'MERCHANT_DEBIT'], {
-    error: 'validation.finance.adjustmentType',
-  }),
-  merchantId: z.uuid({ error: 'validation.merchant.required' }),
-  amount: moneySchema(MAX_COD_AMOUNT),
-  reason: reasonTextSchema,
-});
+/** ADR 0003 §10.4: what an adjustment corrects (checked again by the database). */
+export const ADJUSTMENT_SOURCE_TYPES = [
+  'SHIPMENT_FEE',
+  'RETURN_CHARGE',
+  'COD_SHORTFALL',
+  'JOURNAL_ENTRY',
+  'UNLINKED',
+] as const;
+export type AdjustmentSourceType = (typeof ADJUSTMENT_SOURCE_TYPES)[number];
+
+export const adjustmentSchema = z
+  .object({
+    type: z.enum(['MERCHANT_CREDIT', 'MERCHANT_DEBIT'], {
+      error: 'validation.finance.adjustmentType',
+    }),
+    merchantId: z.uuid({ error: 'validation.merchant.required' }),
+    amount: moneySchema(MAX_COD_AMOUNT),
+    reason: reasonTextSchema,
+    // Optional provenance; without it the adjustment is UNLINKED (independent reviewer needed).
+    sourceType: z
+      .enum(ADJUSTMENT_SOURCE_TYPES, { error: 'validation.finance.adjustmentSource' })
+      .default('UNLINKED'),
+    sourceShipmentId: z.uuid({ error: 'validation.finance.adjustmentSource' }).optional(),
+    sourceJournalEntryId: z.uuid({ error: 'validation.finance.adjustmentSource' }).optional(),
+  })
+  .refine(
+    (input) =>
+      input.sourceType === 'UNLINKED'
+        ? !input.sourceShipmentId && !input.sourceJournalEntryId
+        : input.sourceType === 'JOURNAL_ENTRY'
+          ? Boolean(input.sourceJournalEntryId)
+          : Boolean(input.sourceShipmentId),
+    { path: ['sourceType'], error: 'validation.finance.adjustmentSource' },
+  );
 export type AdjustmentInput = z.infer<typeof adjustmentSchema>;
 
 export const feeCorrectionSchema = z.object({

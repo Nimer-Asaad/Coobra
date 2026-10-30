@@ -27,6 +27,14 @@ const envSchema = z
     API_PUBLIC_URL: z.url().optional(),
     /** Production impersonation (R4): the approved site every host belongs to, e.g. coobra.ps. */
     IMPERSONATION_SITE: z.string().trim().toLowerCase().optional(),
+    /** Phase 4C.4: impersonated writes (ADR 0003 §4). Off unless explicitly enabled, everywhere. */
+    IMPERSONATION_WRITES_ENABLED: booleanString.default(false),
+    /**
+     * R2 confirmation signing keys, '<kid>:<base64url secret>' separated by commas, each secret at
+     * least 32 bytes; CONSEQUENCE_SIGNING_ACTIVE_KEY names the one used to sign (others verify only).
+     */
+    CONSEQUENCE_SIGNING_KEYS: z.string().optional(),
+    CONSEQUENCE_SIGNING_ACTIVE_KEY: z.string().trim().optional(),
     ADMIN_WEB_URL: z.url(),
     MERCHANT_APP_URL: z.url(),
     DRIVER_APP_URL: z.url(),
@@ -73,6 +81,12 @@ export interface AppConfig {
   impersonationSweeperEnabled: boolean;
   /** ADR 0003 R4: impersonation fails closed in production unless the deployment qualifies. */
   impersonation: { enabled: boolean; problems: string[] };
+  /** Impersonated writes: off unless enabled, and only with a valid signing key ring (fail closed). */
+  impersonationWrites: {
+    enabled: boolean;
+    problems: string[];
+    signing: { activeKid: string; keys: Map<string, Buffer> } | null;
+  };
   links: {
     adminWebUrl: string;
     merchantAppUrl: string;
@@ -103,6 +117,57 @@ const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
  * public suffix list (e.g. example.co.uk). Any problem disables impersonation (fail closed); the
  * rest of the API is unaffected. Development and test are not checked (localhost over HTTP).
  */
+/** Parses the signing key ring. Problems name settings only, never key material. */
+export function consequenceSigningKeys(raw: string | undefined, active: string | undefined) {
+  const problems: string[] = [];
+  const keys = new Map<string, Buffer>();
+  if (!raw) problems.push('CONSEQUENCE_SIGNING_KEYS is not set');
+  for (const entry of (raw ?? '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)) {
+    const separator = entry.indexOf(':');
+    const kid = separator > 0 ? entry.slice(0, separator) : '';
+    const secret = separator > 0 ? entry.slice(separator + 1) : '';
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(kid) || !/^[A-Za-z0-9_-]+$/.test(secret)) {
+      problems.push('CONSEQUENCE_SIGNING_KEYS has an entry that is not <kid>:<base64url secret>');
+      continue;
+    }
+    const bytes = Buffer.from(secret, 'base64url');
+    if (bytes.length < 32) {
+      problems.push(`CONSEQUENCE_SIGNING_KEYS key ${kid} is shorter than 32 bytes`);
+      continue;
+    }
+    if (keys.has(kid)) problems.push(`CONSEQUENCE_SIGNING_KEYS repeats key id ${kid}`);
+    keys.set(kid, bytes);
+  }
+  if (!active) problems.push('CONSEQUENCE_SIGNING_ACTIVE_KEY is not set');
+  else if (!keys.has(active))
+    problems.push('CONSEQUENCE_SIGNING_ACTIVE_KEY is not one of the keys');
+  return problems.length === 0 && active
+    ? { signing: { activeKid: active, keys }, problems }
+    : { signing: null, problems };
+}
+
+function impersonationWrites(
+  env: {
+    IMPERSONATION_WRITES_ENABLED: boolean;
+    CONSEQUENCE_SIGNING_KEYS?: string;
+    CONSEQUENCE_SIGNING_ACTIVE_KEY?: string;
+  } & Parameters<typeof impersonationDeployment>[0],
+) {
+  if (!env.IMPERSONATION_WRITES_ENABLED) {
+    return { enabled: false, problems: ['IMPERSONATION_WRITES_ENABLED is false'], signing: null };
+  }
+  const deployment = impersonationDeployment(env);
+  const { signing, problems } = consequenceSigningKeys(
+    env.CONSEQUENCE_SIGNING_KEYS,
+    env.CONSEQUENCE_SIGNING_ACTIVE_KEY,
+  );
+  const all = [...deployment.problems, ...problems];
+  return { enabled: all.length === 0 && signing !== null, problems: all, signing };
+}
+
 export function impersonationDeployment(env: {
   NODE_ENV: string;
   COOKIE_SECURE: boolean;
@@ -169,6 +234,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     rateLimitEnabled: env.RATE_LIMIT_ENABLED,
     impersonationSweeperEnabled: env.IMPERSONATION_SWEEPER_ENABLED,
     impersonation: impersonationDeployment(env),
+    impersonationWrites: impersonationWrites(env),
     links: {
       adminWebUrl: env.ADMIN_WEB_URL,
       merchantAppUrl: env.MERCHANT_APP_URL,

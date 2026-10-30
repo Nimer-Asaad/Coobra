@@ -10,6 +10,7 @@ import {
   type UserRole,
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
+import { assertNoImpersonationConflict } from '../impersonation/write-guards.js';
 import { Errors } from '../common/app-exception.js';
 import type { ActingContext } from '../common/acting-context.js';
 import type { RequestMeta } from '../common/request.js';
@@ -315,6 +316,8 @@ export class CodService {
       throw Errors.forbidden();
     const amount = await this.prisma.client.$transaction(async (tx) => {
       const shortfall = await this.loadShortfall(tx, id);
+      // R1 (ADR 0003 §10.2), also after the impersonation ended.
+      await assertNoImpersonationConflict(tx, shortfall.shipmentId, actor.id);
       if (shortfall.status !== 'OPEN')
         throw Errors.invalidState('Only open shortfalls can be proposed');
       const outstanding = await this.outstanding(tx, shortfall);
@@ -352,6 +355,7 @@ export class CodService {
     return this.idempotency.run(actor.id, `shortfall-approve:${id}`, key, { note }, async () => {
       const resolution = await this.prisma.client.$transaction(async (tx) => {
         const shortfall = await this.loadShortfall(tx, id);
+        await assertNoImpersonationConflict(tx, shortfall.shipmentId, actor.id);
         if (
           shortfall.status !== 'PENDING_APPROVAL' ||
           !shortfall.proposedAmount ||
@@ -417,6 +421,7 @@ export class CodService {
   async reject(actor: Actor, id: string, note: string, meta: RequestMeta) {
     await this.prisma.client.$transaction(async (tx) => {
       const shortfall = await this.loadShortfall(tx, id);
+      await assertNoImpersonationConflict(tx, shortfall.shipmentId, actor.id);
       if (shortfall.status !== 'PENDING_APPROVAL') {
         throw Errors.invalidState('This shortfall has no proposal waiting for approval');
       }

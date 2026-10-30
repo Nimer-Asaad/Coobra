@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@coobra/database';
 import type { AdjustmentInput, AdjustmentItem, FeeCorrectionInput, UserRole } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
+import {
+  assertIndependentAdjustmentReviewer,
+  assertNoImpersonationConflict,
+} from '../impersonation/write-guards.js';
 import { Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -51,6 +55,8 @@ export class AdjustmentsService {
     if (!UUID_PATTERN.test(shipmentId)) throw Errors.notFound();
     const override = await this.prisma.client.$transaction(async (tx) => {
       const shipment = await tx.shipment.findUnique({ where: { id: shipmentId } });
+      // R1 (ADR 0003 §10.2): never correct a fee of a shipment you were involved in.
+      if (shipment) await assertNoImpersonationConflict(tx, shipmentId, actor.id);
       if (!shipment) throw Errors.notFound();
       if (shipment.status !== 'DELIVERED') {
         throw Errors.invalidState(
@@ -127,6 +133,7 @@ export class AdjustmentsService {
           const override = await tx.shipmentFeeOverride.findUniqueOrThrow({
             where: { id: overrideId },
           });
+          await assertNoImpersonationConflict(tx, override.shipmentId, actor.id);
           if (override.phase !== 'POST_DELIVERY' || override.status !== 'PENDING_APPROVAL') {
             throw Errors.invalidState('This fee correction is not waiting for approval');
           }
@@ -258,10 +265,18 @@ export class AdjustmentsService {
       where: { id: input.merchantId, role: 'MERCHANT' },
     });
     if (!merchant) throw Errors.shipmentMerchantInvalid();
-    const row = await this.prisma.client.financialAdjustment.create({
-      data: { ...input, requestedById: actor.id },
-      include: adjustmentInclude,
-    });
+    const row = await this.prisma.client.financialAdjustment
+      .create({
+        data: { ...input, requestedById: actor.id },
+        include: adjustmentInclude,
+      })
+      .catch((error: unknown) => {
+        // The database checks the provenance is this merchant's (ADR 0003 §10.4).
+        if (/financial_adjustments_(provenance|source)_check/.test(String(error))) {
+          throw Errors.validation({ sourceType: 'validation.finance.adjustmentSource' });
+        }
+        throw error;
+      });
     await this.audit.record({
       action: 'ADJUSTMENT_REQUESTED',
       actorUserId: actor.id,
@@ -299,6 +314,9 @@ export class AdjustmentsService {
           adjustment.requestedById,
           adjustment.amount,
         );
+        // ADR 0003 §10.4 (approve and reject): never decide what you were involved in; without
+        // verified provenance, only a reviewer who never impersonated the merchant may decide.
+        await assertIndependentAdjustmentReviewer(tx, adjustment, actor.id);
         let journalEntryId: string | null = null;
         if (approve) {
           const merchant = accounts.merchantBalance(adjustment.merchantId);

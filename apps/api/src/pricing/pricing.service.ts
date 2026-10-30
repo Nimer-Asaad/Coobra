@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, type PricingRule, type ReturnFeePolicy } from '@coobra/database';
 import {
   QUOTE_TTL_MINUTES,
@@ -12,8 +12,11 @@ import {
   type UserRole,
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
+import { assertNoImpersonationConflict } from '../impersonation/write-guards.js';
 import { Errors } from '../common/app-exception.js';
 import type { ActingContext } from '../common/acting-context.js';
+import { assertImpersonationActiveIn } from '../impersonation/write-guards.js';
+import { CLOCK, systemClock, type Clock } from '../common/clock.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { zoneLabel, ZonesService, type ZonePath } from './zones.service.js';
@@ -58,6 +61,7 @@ export class PricingService {
     private readonly prisma: PrismaService,
     private readonly zones: ZonesService,
     private readonly audit: AuditService,
+    @Inject(CLOCK) private readonly clock: Clock = systemClock,
   ) {}
 
   async price(
@@ -171,29 +175,71 @@ export class PricingService {
   ): Promise<PricingQuote> {
     // The quote is the principal's; the real actor is recorded as having requested it.
     const merchant = acting.principal;
-    const db = this.prisma.client;
-    // Always the approved pickup zone: a merchant cannot choose the origin of their price.
-    const originZoneId = await this.resolveOrigin(db, merchant.id, undefined);
-    const result = await this.price(db, {
-      merchantId: merchant.id,
-      originZoneId,
-      destinationZoneId: input.destinationZoneId,
-    });
-    const quote = await db.pricingQuote.create({
-      data: {
+    return this.prisma.client.$transaction(async (db) => {
+      // During an impersonation the write re-validates it inside its own transaction.
+      await assertImpersonationActiveIn(db, acting, () => this.clock.now());
+      // Always the approved pickup zone: a merchant cannot choose the origin of their price.
+      const originZoneId = await this.resolveOrigin(db, merchant.id, undefined);
+      const result = await this.price(db, {
         merchantId: merchant.id,
         originZoneId,
         destinationZoneId: input.destinationZoneId,
-        ruleId: result.rule.id,
-        ruleVersion: result.rule.version,
-        source: result.source,
-        deliveryFee: result.fee,
-        returnFee: result.returnFee,
-        createdById: acting.actor.id,
-        expiresAt: new Date(Date.now() + QUOTE_TTL_MINUTES * 60_000),
+      });
+      const quote = await db.pricingQuote.create({
+        data: {
+          merchantId: merchant.id,
+          originZoneId,
+          destinationZoneId: input.destinationZoneId,
+          ruleId: result.rule.id,
+          ruleVersion: result.rule.version,
+          source: result.source,
+          deliveryFee: result.fee,
+          returnFee: result.returnFee,
+          createdById: acting.actor.id,
+          ...(acting.impersonation ? { impersonationId: acting.impersonation.id } : {}),
+          expiresAt: new Date(Date.now() + QUOTE_TTL_MINUTES * 60_000),
+        },
+      });
+      return this.toQuote(result, quote);
+    });
+  }
+
+  /**
+   * Checks a quote without claiming it (the impersonation fee preview): the same conditions as
+   * consumeQuote, and the current price.
+   */
+  async inspectQuote(
+    db: Db,
+    input: {
+      quoteId: string;
+      merchantId: string;
+      originZoneId: string;
+      destinationZoneId: string;
+      impersonationId: string | null;
+    },
+  ): Promise<PriceResult & { quoteId: string }> {
+    const now = new Date();
+    const quote = await db.pricingQuote.findFirst({
+      where: {
+        id: input.quoteId,
+        merchantId: input.merchantId,
+        originZoneId: input.originZoneId,
+        destinationZoneId: input.destinationZoneId,
+        impersonationId: input.impersonationId,
+        usedAt: null,
+        expiresAt: { gt: now },
       },
     });
-    return this.toQuote(result, quote);
+    if (!quote) throw Errors.quoteInvalid();
+    const current = await this.price(db, { ...input, at: now });
+    if (
+      current.rule.id !== quote.ruleId ||
+      current.rule.version !== quote.ruleVersion ||
+      !current.fee.equals(quote.deliveryFee)
+    ) {
+      throw Errors.priceChanged();
+    }
+    return { ...current, quoteId: quote.id };
   }
 
   /**
@@ -202,7 +248,18 @@ export class PricingService {
    */
   async consumeQuote(
     db: Db,
-    input: { quoteId: string; merchantId: string; originZoneId: string; destinationZoneId: string },
+    input: {
+      quoteId: string;
+      merchantId: string;
+      originZoneId: string;
+      destinationZoneId: string;
+      /**
+       * ADR 0003 decision 3: a quote is usable only in the context that created it. An
+       * impersonation uses only its own quotes; the merchant's own session only quotes made
+       * outside an impersonation.
+       */
+      impersonationId?: string | null;
+    },
   ): Promise<PriceResult & { quoteId: string }> {
     const now = new Date();
     const claimed = await db.pricingQuote.updateMany({
@@ -211,6 +268,7 @@ export class PricingService {
         merchantId: input.merchantId,
         originZoneId: input.originZoneId,
         destinationZoneId: input.destinationZoneId,
+        impersonationId: input.impersonationId ?? null,
         usedAt: null,
         expiresAt: { gt: now },
       },
@@ -442,6 +500,8 @@ export class PricingService {
     if (!UUID_PATTERN.test(shipmentId)) throw Errors.notFound();
     const override = await this.prisma.client.$transaction(async (tx) => {
       const shipment = await tx.shipment.findUnique({ where: { id: shipmentId } });
+      // R1 (ADR 0003 §10.2): never override the fee of a shipment you were involved in.
+      if (shipment) await assertNoImpersonationConflict(tx, shipmentId, actor.id);
       if (!shipment) throw Errors.notFound();
       if (!PRE_DELIVERY_STATUSES.includes(shipment.status)) throw Errors.feeOverrideNotAllowed();
       const updated = await tx.shipment.updateMany({

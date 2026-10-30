@@ -8,6 +8,7 @@ import type {
   WaiveReturnFeeInput,
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
+import { assertNoImpersonationConflict } from '../impersonation/write-guards.js';
 import { Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -67,6 +68,17 @@ export function toReturnInfo(
  * returned one is never delivered. Nothing is refunded or reversed automatically: corrections
  * go through financial adjustments.
  */
+/** The delivery part of the return charge under a policy (one rule for charges and previews). */
+export function returnDeliveryCharge(
+  policy: ReturnRecord['feePolicy'],
+  attemptFee: Prisma.Decimal | null,
+  deliveryFee: Prisma.Decimal,
+): Prisma.Decimal {
+  if (policy === 'RETURN_ONLY') return new Prisma.Decimal(0);
+  if (policy === 'DELIVERY_PLUS_RETURN') return deliveryFee;
+  return Prisma.Decimal.min(attemptFee ?? new Prisma.Decimal(0), deliveryFee);
+}
+
 @Injectable()
 export class ReturnsService {
   constructor(
@@ -80,10 +92,12 @@ export class ReturnsService {
    * Conservative where the policy is silent: nothing without a failed delivery attempt, the
    * attempt fee capped at the shipment's delivery fee, nothing if a delivery fee was posted.
    */
-  private async deliveryCharge(
+  async deliveryChargeFor(
     tx: Tx,
     shipmentId: string,
     pricing: { returnPolicy: ReturnRecord['feePolicy']; attemptFee: Prisma.Decimal | null } | null,
+    /** Preview of a failure that has not been recorded yet (ADR 0003 §10.3, C4). */
+    options: { assumeFailedAttempt?: boolean } = {},
   ): Promise<Prisma.Decimal> {
     const zero = new Prisma.Decimal(0);
     if (!pricing || pricing.returnPolicy === 'RETURN_ONLY') return zero;
@@ -91,20 +105,21 @@ export class ReturnsService {
     const failedAttempts = await tx.shipmentStatusHistory.count({
       where: { shipmentId, toStatus: 'DELIVERY_FAILED' },
     });
-    if (failedAttempts === 0 || !shipment.deliveryFee) return zero;
+    if ((failedAttempts === 0 && !options.assumeFailedAttempt) || !shipment.deliveryFee) {
+      return zero;
+    }
     const feePosted = await tx.journalEntry.count({
       where: { sourceId: shipmentId, kind: { in: ['DELIVERY_FEE', 'PHASE2_BACKFILL'] } },
     });
     if (feePosted > 0) return zero;
-    if (pricing.returnPolicy === 'DELIVERY_PLUS_RETURN') return shipment.deliveryFee;
-    return Prisma.Decimal.min(pricing.attemptFee ?? zero, shipment.deliveryFee);
+    return returnDeliveryCharge(pricing.returnPolicy, pricing.attemptFee, shipment.deliveryFee);
   }
 
   /** Creates the record (once) with the fee and policy from the pricing snapshot, if any. */
   async ensureRecord(
     tx: Tx,
     shipment: Pick<Shipment, 'id'>,
-    requested?: { actorId: string; reason: string | null },
+    requested?: { actorId: string; reason: string | null; impersonationId?: string | null },
   ): Promise<ReturnRecord> {
     const existing = await tx.returnRecord.findUnique({ where: { shipmentId: shipment.id } });
     if (existing) return existing;
@@ -115,17 +130,27 @@ export class ReturnsService {
         shipmentId: shipment.id,
         requestedById: requested?.actorId ?? null,
         requestReason: requested?.reason ?? null,
+        // Set only during an impersonation (the database ties it to requestedById).
+        ...(requested?.impersonationId
+          ? { requestedImpersonationId: requested.impersonationId }
+          : {}),
         feeStatus: configured ? 'SET' : 'RETURN_FEE_UNCONFIGURED',
         feeAmount: configured,
         feeReason: configured ? 'Return fee from the pricing rule' : null,
         feePolicy: pricing?.returnPolicy ?? 'RETURN_ONLY',
-        deliveryCharge: await this.deliveryCharge(tx, shipment.id, pricing),
+        deliveryCharge: await this.deliveryChargeFor(tx, shipment.id, pricing),
       },
     });
   }
 
-  onRequested(tx: Tx, shipment: Shipment, actor: Actor, reason: string | null) {
-    return this.ensureRecord(tx, shipment, { actorId: actor.id, reason });
+  onRequested(
+    tx: Tx,
+    shipment: Shipment,
+    actor: Actor,
+    reason: string | null,
+    impersonationId: string | null = null,
+  ) {
+    return this.ensureRecord(tx, shipment, { actorId: actor.id, reason, impersonationId });
   }
 
   async onApproved(
@@ -213,6 +238,8 @@ export class ReturnsService {
   async setFee(actor: Actor, shipmentId: string, input: SetReturnFeeInput, meta: RequestMeta) {
     await this.prisma.client.$transaction(async (tx) => {
       const { shipment, record } = await this.lockRecord(tx, shipmentId);
+      // R1: never decide the fee of a return you were involved in while impersonating.
+      await assertNoImpersonationConflict(tx, shipmentId, actor.id);
       await tx.returnRecord.update({
         where: { id: record.id },
         data: {
@@ -244,6 +271,8 @@ export class ReturnsService {
   async waive(actor: Actor, shipmentId: string, input: WaiveReturnFeeInput, meta: RequestMeta) {
     await this.prisma.client.$transaction(async (tx) => {
       const { shipment, record } = await this.lockRecord(tx, shipmentId);
+      // R1: never decide the fee of a return you were involved in while impersonating.
+      await assertNoImpersonationConflict(tx, shipmentId, actor.id);
       await tx.returnRecord.update({
         where: { id: record.id },
         data: {

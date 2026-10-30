@@ -119,7 +119,12 @@ export class AuthGuard implements CanActivate {
 
     const route = (request as { route?: { path?: string } }).route?.path;
     const policy = impersonationRoutePolicy(`${request.method} ${route ?? ''}`);
-    if (policy.access !== 'ALLOWED') throw Errors.impersonationForbiddenAction();
+    // SAFEGUARDED writes pass only when impersonated writes are enabled (Phase 4C.4); the
+    // service then applies the per-transition policy, reason and confirmation.
+    const permitted =
+      policy.access === 'ALLOWED' ||
+      (policy.access === 'SAFEGUARDED' && this.config.impersonationWrites.enabled);
+    if (!permitted) throw Errors.impersonationForbiddenAction();
   }
 
   private extractCredential(

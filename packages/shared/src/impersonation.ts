@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { reasonTextSchema } from './pricing.js';
 import { PASSWORD_MAX_LENGTH } from './validation.js';
-import type { ShipmentStatus } from './shipments.js';
+import { SHIPMENT_STATUSES, type ShipmentStatus } from './shipments.js';
 
 /*
  * Phase 4C SUPER_ADMIN impersonation contracts (ADR 0003).
@@ -133,6 +133,9 @@ export const IMPERSONATION_ROUTE_POLICY = {
   // --- Merchant app -----------------------------------------------------------------------------
   'GET /v1/merchant/shipments': read,
   'GET /v1/merchant/shipments/:id': read,
+  /** R2 fee previews (Phase 4C.4): impersonation only; they write nothing. */
+  'GET /v1/merchant/shipment-consequences': read,
+  'GET /v1/merchant/shipments/:id/consequences': read,
   /** C1: delivery fee, return terms and COD amount are confirmed (R2). */
   'POST /v1/merchant/shipments': { access: 'SAFEGUARDED', basis: 'OPERATIONAL' },
   /** Classified per transition by IMPERSONATION_TRANSITION_POLICY. */
@@ -167,6 +170,7 @@ export const IMPERSONATION_ROUTE_POLICY = {
   // --- Driver app -------------------------------------------------------------------------------
   'GET /v1/driver/shipments': read,
   'GET /v1/driver/shipments/:id': read,
+  'GET /v1/driver/shipments/:id/consequences': read,
   /** Classified per transition by IMPERSONATION_TRANSITION_POLICY. */
   'POST /v1/driver/shipments/:id/transitions': {
     access: 'SAFEGUARDED',
@@ -520,3 +524,17 @@ export const listImpersonationsQuerySchema = z.object({
     .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 export type ListImpersonationsQuery = z.infer<typeof listImpersonationsQuerySchema>;
+
+/** `GET /v1/merchant/shipment-consequences`: the fee preview before an impersonated create. */
+export const createConsequencesQuerySchema = z.object({
+  destinationZoneId: z.uuid({ error: 'validation.zone.required' }),
+  codAmount: z.string().regex(/^\d{1,7}(\.\d{1,2})?$/, { error: 'validation.money.invalid' }),
+  quoteId: z.uuid({ error: 'validation.quote.invalid' }).optional(),
+});
+export type CreateConsequencesQuery = z.infer<typeof createConsequencesQuerySchema>;
+
+/** `GET /v1/{merchant|driver}/shipments/:id/consequences`: the preview before a transition. */
+export const transitionConsequencesQuerySchema = z.object({
+  toStatus: z.enum(SHIPMENT_STATUSES, { error: 'validation.status.invalid' }),
+});
+export type TransitionConsequencesQuery = z.infer<typeof transitionConsequencesQuerySchema>;
