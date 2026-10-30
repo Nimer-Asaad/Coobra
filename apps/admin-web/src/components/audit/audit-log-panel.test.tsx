@@ -35,6 +35,8 @@ const entry = (overrides: Partial<AuditLogListItem> = {}): AuditLogListItem => (
   targetUser: { id: 'm-1', fullName: 'Jenin Sweets', role: 'MERCHANT' },
   entity: { type: 'SHIPMENT', id: SHIPMENT },
   summary: 'CB-12345678',
+  effectiveUser: null,
+  impersonationId: null,
   ...overrides,
 });
 const details: AuditLogDetails = {
@@ -144,6 +146,35 @@ describe('AuditLogPanel', () => {
     expect(screen.getByText('The end date must be after the start date.')).toBeTruthy();
     expect(screen.getByLabelText('To').getAttribute('aria-invalid')).toBe('true');
     expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('shows "acting as" for impersonated entries and filters by that impersonation', async () => {
+    const user = userEvent.setup();
+    const IMPERSONATION = '0199a1c2-7d3e-7f00-8000-0000000000ff';
+    serve(
+      page([
+        entry({
+          actor: { id: 'sa-1', fullName: 'Rana Admin', role: 'SUPER_ADMIN' },
+          effectiveUser: { id: 'm-1', fullName: 'Jenin Sweets', role: 'MERCHANT' },
+          impersonationId: IMPERSONATION,
+        }),
+      ]),
+    );
+    const view = renderWithProviders(<AuditLogPanel />);
+    await user.click(
+      await screen.findByRole('button', { name: 'acting as Jenin Sweets' }, FIRST_RENDER),
+    );
+    expect(replace).toHaveBeenLastCalledWith(`/audit?impersonationId=${IMPERSONATION}`);
+
+    view.unmount();
+    search = new URLSearchParams(`impersonationId=${IMPERSONATION}`);
+    renderWithProviders(<AuditLogPanel />);
+    await screen.findByText('Rana Admin');
+    expect(bffMock).toHaveBeenCalledWith(
+      `/v1/admin/audit-logs?page=1&pageSize=25&impersonationId=${IMPERSONATION}`,
+    );
+    await user.click(screen.getByRole('button', { name: 'Remove the impersonation filter' }));
+    expect(replace).toHaveBeenLastCalledWith('/audit');
   });
 
   it('filters by a person or a record from the table, and shows the person filter', async () => {

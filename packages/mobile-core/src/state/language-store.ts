@@ -11,6 +11,8 @@ interface LanguageState {
   restartRequired: boolean;
   hydrate: () => Promise<void>;
   setLanguage: (language: Language) => Promise<void>;
+  /** Uses a language in this tab without saving it (an impersonation tab with no choice yet). */
+  setForThisTab: (language: Language) => void;
 }
 
 export const useLanguageStore = create<LanguageState>((set) => ({
@@ -27,5 +29,9 @@ export const useLanguageStore = create<LanguageState>((set) => ({
     await storage.set(STORAGE_KEYS.language, language);
     const { restartRequired } = applyDirection(language);
     set({ language, restartRequired });
+  },
+  setForThisTab: (language) => {
+    applyDirection(language);
+    set({ language });
   },
 }));

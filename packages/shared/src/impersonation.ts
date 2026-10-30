@@ -31,6 +31,15 @@ export const IMPERSONATION_SECURE_COOKIE_NAME = '__Host-coobra_imp_session';
 /** `postMessage` types of the hand-off between the admin console and the app tab. */
 export const IMPERSONATION_MESSAGE_READY = 'coobra:impersonation:ready';
 export const IMPERSONATION_MESSAGE_CODE = 'coobra:impersonation:code';
+/**
+ * The tab tells the console whether the exchange worked (`{ type, ok }`, nothing else). Without
+ * a successful result in time the console ends the impersonation, so a failed hand-off never
+ * leaves an active impersonation behind.
+ */
+export const IMPERSONATION_MESSAGE_RESULT = 'coobra:impersonation:result';
+/** How long the console waits for the opened tab, before and after sending the code. */
+export const IMPERSONATION_HANDOFF_READY_TIMEOUT_MS = 15_000;
+export const IMPERSONATION_HANDOFF_RESULT_TIMEOUT_MS = 20_000;
 
 export const IMPERSONATION_END_REASONS = [
   'MANUAL',
@@ -397,6 +406,45 @@ export function impersonationTransitionPolicy(
 }
 
 // ---------------------------------------------------------------------------------------------
+// What the impersonated app shows (display only: the API enforces the same tables)
+// ---------------------------------------------------------------------------------------------
+
+/** Why an action is unavailable: the route's basis, or VIEW_ONLY when writes are switched off. */
+export type ImpersonationBlock = 'VIEW_ONLY' | ImpersonationBasis;
+
+/** Null when the route may be used during this impersonation. */
+export function impersonationRouteBlock(
+  route: ClassifiedRoute,
+  writesEnabled: boolean,
+): ImpersonationBlock | null {
+  const policy = impersonationRoutePolicy(route);
+  if (policy.access === 'FORBIDDEN') return policy.basis;
+  if (policy.access === 'SAFEGUARDED' && !writesEnabled) return 'VIEW_ONLY';
+  return null;
+}
+
+export interface ImpersonationTransitionCapability {
+  block: ImpersonationBlock | null;
+  requiresReason: boolean;
+  /** R2: the charges must be previewed and confirmed (server-signed token). */
+  requiresConfirmation: boolean;
+}
+
+export function impersonationTransitionCapability(
+  role: ImpersonationTargetRole,
+  from: ShipmentStatus,
+  to: ShipmentStatus,
+  writesEnabled: boolean,
+): ImpersonationTransitionCapability {
+  const policy = impersonationTransitionPolicy(role, from, to);
+  return {
+    block: policy.access === 'FORBIDDEN' ? policy.basis : writesEnabled ? null : 'VIEW_ONLY',
+    requiresReason: policy.requiresReason,
+    requiresConfirmation: policy.consequences.length > 0,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // R2: server-generated confirmation of financial consequences
 // ---------------------------------------------------------------------------------------------
 
@@ -506,6 +554,11 @@ export interface ImpersonationInfo {
   endedReason: ImpersonationEndReason | null;
   /** Server clock, so the countdown does not depend on the client's clock. */
   serverNow: string;
+  /**
+   * Whether impersonated writes are enabled on the API (IMPERSONATION_WRITES_ENABLED and a valid
+   * key ring). When false the impersonation is view only; the API refuses every write either way.
+   */
+  writesEnabled: boolean;
 }
 
 /** `POST /v1/admin/impersonations`: the code goes to the opened tab by postMessage only. */

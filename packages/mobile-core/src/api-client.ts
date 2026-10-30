@@ -1,6 +1,7 @@
 import {
   AUTH_TRANSPORT_HEADER,
   IDEMPOTENCY_HEADER,
+  IMPERSONATION_HEADER,
   isApiErrorBody,
   type ApiErrorBody,
 } from '@coobra/shared';
@@ -20,6 +21,8 @@ export interface RequestOptions {
   body?: unknown;
   /** Required by money-moving endpoints; reuse the same key when retrying the same action. */
   idempotencyKey?: string;
+  /** Sends the impersonation header even before the tab is impersonating (the code exchange). */
+  impersonation?: boolean;
 }
 
 export interface ApiClient {
@@ -35,11 +38,21 @@ export function createApiClient(options: {
   apiUrl: string;
   getToken: () => string | null;
   onUnauthenticated: () => void;
+  /** True while this tab acts as another account (web only, ADR 0003 §8.2). */
+  isImpersonating?: () => boolean;
+  /** The impersonation is no longer accepted: the tab must not fall back to the real session. */
+  onImpersonationLost?: () => void;
 }): ApiClient {
   return {
-    async request<T>(path: string, { method = 'GET', body, idempotencyKey }: RequestOptions = {}) {
+    async request<T>(
+      path: string,
+      { method = 'GET', body, idempotencyKey, impersonation }: RequestOptions = {},
+    ) {
+      const impersonating = Boolean(impersonation || options.isImpersonating?.());
       const headers: Record<string, string> = { accept: 'application/json' };
       if (idempotencyKey) headers[IDEMPOTENCY_HEADER] = idempotencyKey;
+      // With this header the API uses only the impersonation cookie, never `coobra_session`.
+      if (impersonating) headers[IMPERSONATION_HEADER] = '1';
       if (body !== undefined) headers['content-type'] = 'application/json';
       if (usesCookieSessions) {
         headers[AUTH_TRANSPORT_HEADER] = 'cookie';
@@ -70,7 +83,10 @@ export function createApiClient(options: {
               code: 'INTERNAL_ERROR',
               message: 'Unexpected response',
             } as const);
-        if (error.code === 'UNAUTHENTICATED') options.onUnauthenticated();
+        if (error.code === 'UNAUTHENTICATED') {
+          if (impersonating) options.onImpersonationLost?.();
+          else options.onUnauthenticated();
+        }
         throw new ApiError(error);
       }
       return data as T;

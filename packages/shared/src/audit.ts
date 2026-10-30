@@ -161,6 +161,8 @@ export const listAuditLogsQuerySchema = z
     targetUserId: optionalUuid,
     entityType: z.enum(AUDIT_ENTITY_TYPES, { error: 'validation.audit.entityType' }).optional(),
     entityId: optionalText.pipe(z.string().max(100).optional()),
+    /** Everything done in one impersonation, including its start and end (ADR 0003 §11.4). */
+    impersonationId: optionalUuid,
     /** Inclusive start and exclusive end (ISO date-time with offset). */
     from: optionalDate,
     to: optionalDate,
@@ -214,6 +216,12 @@ export interface AuditLogListItem {
   entity: AuditEntity | null;
   /** A short, safe hint for the table (tracking number, reference, reason). */
   summary: string | null;
+  /**
+   * Set when the actor (always the real person) acted as another account during an
+   * impersonation: "{actor} acting as {effectiveUser}" (ADR 0003 §11.4).
+   */
+  effectiveUser: AuditPerson | null;
+  impersonationId: string | null;
 }
 
 export interface AuditLogDetails extends AuditLogListItem {

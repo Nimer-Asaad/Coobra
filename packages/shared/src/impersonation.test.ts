@@ -4,7 +4,9 @@ import {
   IMPERSONATION_ROUTE_POLICY,
   IMPERSONATION_TARGET_ROLES,
   IMPERSONATION_TRANSITION_POLICY,
+  impersonationRouteBlock,
   impersonationRoutePolicy,
+  impersonationTransitionCapability,
   impersonationTransitionPolicy,
   startImpersonationSchema,
   type ImpersonationRoutePolicy,
@@ -178,5 +180,38 @@ describe('impersonation request schemas', () => {
     expect(
       exchangeImpersonationSchema.safeParse({ code, codeVerifier: verifier.slice(0, 42) }).success,
     ).toBe(false);
+  });
+});
+
+describe('what the impersonated app shows', () => {
+  it('blocks forbidden routes by their basis and safeguarded ones only when writes are off', () => {
+    expect(impersonationRouteBlock('GET /v1/merchant/finance', false)).toBeNull();
+    expect(impersonationRouteBlock('POST /v1/merchant/finance/payouts', true)).toBe(
+      'FINANCIAL_CONSENT',
+    );
+    expect(impersonationRouteBlock('POST /v1/driver/finance/settlements', true)).toBe(
+      'CASH_CUSTODY',
+    );
+    expect(impersonationRouteBlock('POST /v1/merchant/shipments', true)).toBeNull();
+    expect(impersonationRouteBlock('POST /v1/merchant/shipments', false)).toBe('VIEW_ONLY');
+  });
+
+  it('follows the transition table, failing closed for unlisted transitions', () => {
+    expect(
+      impersonationTransitionCapability('DRIVER', 'OUT_FOR_DELIVERY', 'DELIVERED', true),
+    ).toEqual({
+      block: 'LEDGER_POSTING',
+      requiresReason: false,
+      requiresConfirmation: false,
+    });
+    expect(
+      impersonationTransitionCapability('DRIVER', 'OUT_FOR_DELIVERY', 'DELIVERY_FAILED', true),
+    ).toEqual({ block: null, requiresReason: true, requiresConfirmation: true });
+    expect(impersonationTransitionCapability('MERCHANT', 'CREATED', 'CANCELLED', false).block).toBe(
+      'VIEW_ONLY',
+    );
+    expect(impersonationTransitionCapability('MERCHANT', 'CREATED', 'DELIVERED', true).block).toBe(
+      'STAFF_ONLY',
+    );
   });
 });

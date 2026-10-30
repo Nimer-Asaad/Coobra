@@ -33,6 +33,11 @@ import { NativeSelect } from '@/components/ui/select';
 import { bff } from '@/lib/api-client';
 import { formatDateTime, startOfLocalDay, startOfNextLocalDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import {
+  AdjustmentSourceFields,
+  AdjustmentSourceLabel,
+  useRequestAdjustment,
+} from './adjustment-source';
 import { Amount, InlineAction, StatusPill, useFieldError, useFinanceAction } from './common';
 
 type Tab = 'overview' | 'drivers' | 'merchants' | 'reviews';
@@ -1095,7 +1100,7 @@ function ReviewsTab({
     queryFn: () => bff<MerchantBalanceRow[]>('/v1/admin/finance/merchants'),
     enabled: canDecide,
   });
-  const requestAdjustment = useBffPost('/v1/admin/finance/adjustments', false);
+  const requestAdjustment = useRequestAdjustment();
   const adjustmentError = useFieldError(requestAdjustment.error);
 
   return (
@@ -1140,6 +1145,9 @@ function ReviewsTab({
                       merchantId: text(form, 'merchantId'),
                       amount: text(form, 'amount'),
                       reason: text(form, 'reason'),
+                      sourceType: text(form, 'sourceType'),
+                      sourceTracking: text(form, 'sourceTracking'),
+                      sourceJournalEntryId: text(form, 'sourceJournalEntryId'),
                     })
                   }
                 >
@@ -1179,6 +1187,7 @@ function ReviewsTab({
                   {adjustmentError('amount')}
                   <FormField name="reason" label={t('finance.reason')} />
                   {adjustmentError('reason')}
+                  <AdjustmentSourceFields error={adjustmentError} />
                 </InlineAction>
               ) : null}
               <ul className="divide-y">
@@ -1206,6 +1215,7 @@ function ReviewsTab({
                       {t('finance.requestedBy', { name: item.requestedBy.fullName })} ·{' '}
                       {formatDateTime(item.createdAt, i18n.language)}
                     </p>
+                    <AdjustmentSourceLabel item={item} />
                     {canDecide && item.status === 'PENDING_APPROVAL' ? (
                       <DecisionButtons path={`/v1/admin/finance/adjustments/${item.id}`} />
                     ) : null}

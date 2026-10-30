@@ -278,7 +278,7 @@ export class ImpersonationService {
         return created;
       });
       return {
-        impersonation: toImpersonationInfo(row, now),
+        impersonation: toImpersonationInfo(row, now, this.config),
         code,
         appOrigin: appOriginFor(this.config, row.clientApp as 'MERCHANT_APP' | 'DRIVER_APP'),
       };
@@ -364,7 +364,10 @@ export class ImpersonationService {
       return { ok: true as const, token, imp };
     });
     if (!outcome.ok) throw codeInvalid();
-    return { token: outcome.token, impersonation: toImpersonationInfo(outcome.imp, now) };
+    return {
+      token: outcome.token,
+      impersonation: toImpersonationInfo(outcome.imp, now, this.config),
+    };
   }
 
   /** Ends an impersonation (idempotent): returns its final state either way. */
@@ -379,7 +382,7 @@ export class ImpersonationService {
         where: { id },
         include: impersonationInfoInclude,
       });
-      return toImpersonationInfo(row, now);
+      return toImpersonationInfo(row, now, this.config);
     });
   }
 
@@ -391,7 +394,7 @@ export class ImpersonationService {
       include: impersonationInfoInclude,
     });
     if (!row) throw Errors.notFound();
-    return toImpersonationInfo(row, this.clock.now());
+    return toImpersonationInfo(row, this.clock.now(), this.config);
   }
 
   async list(active: boolean | undefined): Promise<ImpersonationInfo[]> {
@@ -408,6 +411,6 @@ export class ImpersonationService {
       orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
       take: 50,
     });
-    return rows.map((row) => toImpersonationInfo(row, now));
+    return rows.map((row) => toImpersonationInfo(row, now, this.config));
   }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import type { TFunction } from 'i18next';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -41,6 +42,11 @@ export function formatAuditValue(
     return value;
   }
   return JSON.stringify(value);
+}
+
+/** The impersonation an entry belongs to: done during it, or its own start/end event. */
+function impersonationOf(entry: AuditLogDetails): string | null {
+  return entry.impersonationId ?? (entry.entity?.type === 'IMPERSONATION' ? entry.entity.id : null);
 }
 
 export function AuditEntryDialog({ id, onClose }: { id: string; onClose: () => void }) {
@@ -85,6 +91,14 @@ export function AuditEntryDialog({ id, onClose }: { id: string; onClose: () => v
               {data!.actor
                 ? `${data!.actor.fullName} · ${t(`roles.${data!.actor.role}`)}`
                 : t('audit.system')}
+              {data!.effectiveUser ? (
+                <span className="block font-medium text-amber-800">
+                  {t('audit.actingAsRole', {
+                    name: data!.effectiveUser.fullName,
+                    role: t(`roles.${data!.effectiveUser.role}`),
+                  })}
+                </span>
+              ) : null}
             </Item>
             <Item label={t('audit.target')}>
               {data!.targetUser
@@ -103,6 +117,17 @@ export function AuditEntryDialog({ id, onClose }: { id: string; onClose: () => v
                 '–'
               )}
             </Item>
+            {impersonationOf(data!) ? (
+              <Item label={t('audit.impersonation')}>
+                <Link
+                  className="text-primary hover:underline"
+                  href={`/audit?impersonationId=${impersonationOf(data!)}`}
+                  onClick={onClose}
+                >
+                  {t('audit.viewImpersonation')}
+                </Link>
+              </Item>
+            ) : null}
           </dl>
 
           {data!.changes.length ? (

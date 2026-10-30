@@ -202,6 +202,10 @@ export interface AdjustmentItem {
   decidedAt: string | null;
   decisionNote: string | null;
   createdAt: string;
+  /** What the adjustment corrects (ADR 0003 §10.4); UNLINKED needs an independent reviewer. */
+  sourceType: AdjustmentSourceType;
+  sourceShipment: { id: string; trackingNumber: string } | null;
+  sourceJournalEntryId: string | null;
 }
 
 export interface FinanceSettingItem {

@@ -25,6 +25,7 @@ const adjustmentInclude = {
   },
   requestedBy: { select: { id: true, fullName: true } },
   decidedBy: { select: { id: true, fullName: true } },
+  sourceShipment: { select: { id: true, trackingNumber: true } },
 } as const satisfies Prisma.FinancialAdjustmentInclude;
 
 /**
@@ -248,6 +249,9 @@ export class AdjustmentsService {
       decidedAt: row.decidedAt?.toISOString() ?? null,
       decisionNote: row.decisionNote,
       createdAt: row.createdAt.toISOString(),
+      sourceType: row.sourceType,
+      sourceShipment: row.sourceShipment,
+      sourceJournalEntryId: row.sourceJournalEntryId,
     };
   }
 

@@ -184,6 +184,8 @@ describe('Impersonation lifecycle (PostgreSQL integration)', () => {
       expect(me.body.impersonation).toMatchObject({
         actor: { id: admin.id },
         target: { id: merchant.id },
+        // Phase 4C.5: the app shows view-only mode (writes are off unless enabled).
+        writesEnabled: false,
       });
       await tab(tabCookie).get('/v1/merchant/shipments').expect(200);
 

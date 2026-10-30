@@ -128,7 +128,11 @@ type ImpersonationWithPeople = Prisma.ImpersonationSessionGetPayload<{
   include: typeof impersonationInfoInclude;
 }>;
 
-export function toImpersonationInfo(row: ImpersonationWithPeople, now: Date): ImpersonationInfo {
+export function toImpersonationInfo(
+  row: ImpersonationWithPeople,
+  now: Date,
+  config: AppConfig,
+): ImpersonationInfo {
   return {
     id: row.id,
     actor: row.actor,
@@ -138,6 +142,7 @@ export function toImpersonationInfo(row: ImpersonationWithPeople, now: Date): Im
     endedAt: row.endedAt?.toISOString() ?? null,
     endedReason: row.endedReason ?? null,
     serverNow: now.toISOString(),
+    writesEnabled: config.impersonationWrites.enabled,
   };
 }
 
@@ -145,12 +150,13 @@ export async function loadImpersonationInfo(
   db: Tx,
   id: string,
   now: Date,
+  config: AppConfig,
 ): Promise<ImpersonationInfo | null> {
   const row = await db.impersonationSession.findUnique({
     where: { id },
     include: impersonationInfoInclude,
   });
-  return row ? toImpersonationInfo(row, now) : null;
+  return row ? toImpersonationInfo(row, now, config) : null;
 }
 
 /** The separate httpOnly impersonation cookie (host-only, `SameSite=Strict`, ADR §8.2). */

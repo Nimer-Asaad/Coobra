@@ -27,6 +27,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { bff, ClientApiError } from '@/lib/api-client';
 import { formatDateTime } from '@/lib/format';
 import { useFormErrors } from '@/lib/use-form-errors';
+import {
+  ImpersonateAction,
+  type ImpersonationAppUrls,
+} from '@/components/impersonation/impersonate-action';
 import { USERS_KEY } from './users-panel';
 import { UserStatusBadge } from './user-status-badge';
 
@@ -36,7 +40,16 @@ type Notice = 'saved' | 'deactivated' | 'reactivated' | 'roleChanged';
 const text = (form: FormData, key: string) => String(form.get(key) ?? '').trim();
 
 /** One user's account, history and the changes a super admin may make to it. */
-export function UserDetailsPanel({ id, currentUserId }: { id: string; currentUserId: string }) {
+export function UserDetailsPanel({
+  id,
+  currentUserId,
+  appUrls = { MERCHANT: null, DRIVER: null },
+}: {
+  id: string;
+  currentUserId: string;
+  /** Where an impersonation of a merchant or driver opens (null: not configured). */
+  appUrls?: ImpersonationAppUrls;
+}) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState<DialogKind | null>(null);
@@ -144,6 +157,7 @@ export function UserDetailsPanel({ id, currentUserId }: { id: string; currentUse
                 >
                   {data.status === 'ACTIVE' ? t('users.deactivate') : t('users.reactivate')}
                 </Button>
+                <ImpersonateAction user={data} currentUserId={currentUserId} appUrls={appUrls} />
               </>
             )}
           </CardContent>

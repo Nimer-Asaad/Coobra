@@ -5,12 +5,15 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-n
 import {
   availableShipmentTransitions,
   normalizeMoney,
+  reasonTextSchema,
   type ShipmentActor,
   type ShipmentDetails,
   type ShipmentTransitionRule,
 } from '@coobra/shared';
 import { ApiError } from '../api-client';
 import { useMobileConfig } from '../config';
+import { ConsequenceSheet } from '../impersonation/consequence-sheet';
+import { useImpersonationGuard } from '../impersonation/use-guard';
 import { AppButton } from '../ui/button';
 import { Banner } from '../ui/banner';
 import { ErrorBanner } from '../ui/error-banner';
@@ -19,7 +22,7 @@ import { AppText } from '../ui/text';
 import { TextField } from '../ui/text-field';
 import { colors, radius, spacing } from '../ui/theme';
 import { useDirection } from '../ui/use-direction';
-import { useShipment, useShipmentTransition } from './api';
+import { useConsequencePreviews, useShipment, useShipmentTransition } from './api';
 import { useFollowUpCollection } from './finance-api';
 import { InfoRow, Row, Section, StatusBadge, Timeline } from './components';
 import { formatDateTime, formatMoney, zoneText } from './format';
@@ -285,12 +288,25 @@ function TransitionAction({
   onDone: () => void;
 }) {
   const { t } = useTranslation();
+  const { clientApp } = useMobileConfig();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [localReasonError, setLocalReasonError] = useState<string | undefined>();
+  const [reviewing, setReviewing] = useState(false);
   const transition = useShipmentTransition(shipment.id);
+  const previews = useConsequencePreviews();
+  const guard = useImpersonationGuard();
+  // During an impersonation: the shared policy decides (blocked, reason, charge confirmation).
+  const capability = guard.transition(
+    clientApp === 'DRIVER_APP' ? 'DRIVER' : 'MERCHANT',
+    shipment.status,
+    rule.to,
+  );
   const destructive = ['CANCELLED', 'DELIVERY_FAILED', 'RETURN_REQUESTED'].includes(rule.to);
+  const requiresReason = rule.requiresReason || Boolean(capability?.requiresReason);
   const reasonError =
-    transition.error instanceof ApiError ? transition.error.body.fieldErrors?.reason : undefined;
+    localReasonError ??
+    (transition.error instanceof ApiError ? transition.error.body.fieldErrors?.reason : undefined);
 
   const title = t(`shipments.actions.to.${rule.to}`);
   if (!open) {
@@ -299,6 +315,7 @@ function TransitionAction({
         variant={destructive ? 'outline' : 'primary'}
         title={title}
         onPress={() => setOpen(true)}
+        disabledReason={capability?.blockedReason}
         testID={`action-${rule.to}`}
       />
     );
@@ -306,9 +323,24 @@ function TransitionAction({
 
   const finish = () => {
     setOpen(false);
+    setReviewing(false);
     setReason('');
     onDone();
   };
+  const trimmedReason = reason.trim() || undefined;
+
+  function submit() {
+    // Checked here only during an impersonation (otherwise the API's answer is shown, as before).
+    if (capability && requiresReason && !reasonTextSchema.safeParse(reason).success) {
+      setLocalReasonError('validation.reason.required');
+      return;
+    }
+    if (capability?.requiresConfirmation) {
+      setReviewing(true);
+      return;
+    }
+    transition.mutate({ toStatus: rule.to, reason: trimmedReason }, { onSuccess: finish });
+  }
 
   if (rule.requiresCodConfirmation) {
     return (
@@ -326,13 +358,14 @@ function TransitionAction({
   return (
     <View style={styles.panel}>
       <AppText variant="subtitle">{title}</AppText>
-      {rule.requiresReason ? (
+      {requiresReason ? (
         <TextField
           label={t('shipments.actions.reason')}
           placeholder={t('shipments.actions.reasonPlaceholder')}
           value={reason}
           onChangeText={(value) => {
             setReason(value);
+            setLocalReasonError(undefined);
             transition.reset();
           }}
           multiline
@@ -342,16 +375,30 @@ function TransitionAction({
       ) : null}
       {reasonError ? null : <ErrorBanner error={transition.error} />}
       <AppButton
-        title={t('shipments.actions.confirm')}
-        loading={transition.isPending}
-        onPress={() =>
-          transition.mutate(
-            { toStatus: rule.to, reason: reason.trim() || undefined },
-            { onSuccess: finish },
-          )
+        title={
+          capability?.requiresConfirmation
+            ? t('impersonation.charges.review')
+            : t('shipments.actions.confirm')
         }
+        loading={transition.isPending && !reviewing}
+        onPress={submit}
         testID={`confirm-${rule.to}`}
       />
+      {reviewing ? (
+        <ConsequenceSheet
+          title={title}
+          load={() => previews.forTransition(shipment.id, rule.to)}
+          confirm={async (confirmationToken) => {
+            await transition.mutateAsync({
+              toStatus: rule.to,
+              reason: trimmedReason,
+              confirmationToken,
+            });
+            finish();
+          }}
+          onClose={() => setReviewing(false)}
+        />
+      ) : null}
       <AppButton variant="link" title={t('common.cancel')} onPress={() => setOpen(false)} />
     </View>
   );
@@ -525,6 +572,9 @@ function FollowUpCollection({ shipmentId }: { shipmentId: string }) {
   const { t } = useTranslation();
   const [amount, setAmount] = useState('');
   const collect = useFollowUpCollection(shipmentId);
+  const blocked = useImpersonationGuard().blockedReason(
+    'POST /v1/driver/shipments/:id/collections',
+  );
   return (
     <View style={styles.panel}>
       <TextField
@@ -540,6 +590,7 @@ function FollowUpCollection({ shipmentId }: { shipmentId: string }) {
         title={t('finance.confirm')}
         loading={collect.isPending}
         disabled={!amount.trim()}
+        disabledReason={blocked}
         onPress={() => collect.mutate({ amount }, { onSuccess: () => setAmount('') })}
         testID="followup-submit"
       />

@@ -1,9 +1,16 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createShipmentSchema, zoneOptions } from '@coobra/shared';
+import {
+  createShipmentSchema,
+  zoneOptions,
+  type CreateShipmentInput,
+  type ShipmentDetails,
+} from '@coobra/shared';
 import { ApiError } from '../api-client';
 import { useFormErrors } from '../form-errors';
+import { ConsequenceSheet } from '../impersonation/consequence-sheet';
+import { useImpersonationGuard } from '../impersonation/use-guard';
 import { useSessionStore } from '../state/session-store';
 import { AppButton } from '../ui/button';
 import { Banner } from '../ui/banner';
@@ -12,7 +19,14 @@ import { Screen } from '../ui/screen';
 import { AppText } from '../ui/text';
 import { TextField } from '../ui/text-field';
 import { useDirection } from '../ui/use-direction';
-import { useCreateShipment, usePickupZone, useQuote, useRequestPickupZone, useZones } from './api';
+import {
+  useConsequencePreviews,
+  useCreateShipment,
+  usePickupZone,
+  useQuote,
+  useRequestPickupZone,
+  useZones,
+} from './api';
 import { ChoiceField, Section } from './components';
 import { formatDateTime, formatMoney } from './format';
 
@@ -46,6 +60,16 @@ export function CreateShipmentScreen() {
   // Refreshes the approved zone (staff may have approved a request since sign-in).
   const pickup = usePickupZone();
   const requestPickup = useRequestPickupZone();
+  const previews = useConsequencePreviews();
+  const guard = useImpersonationGuard();
+  // View only: nothing can be created (the quote is a write too); explained, not hidden.
+  const createBlocked = guard.blockedReason('POST /v1/merchant/shipments');
+  const pickupBlocked = guard.blockedReason('PUT /v1/merchant/pickup-zone');
+  // During an impersonation the charges are confirmed first (R2).
+  const [reviewing, setReviewing] = useState<{
+    values: CreateShipmentInput;
+    addAnother: boolean;
+  } | null>(null);
   const options = zoneOptions(zones.data ?? [], language)
     .filter((option) => option.active)
     .map((option) => ({ value: option.id, label: option.path }));
@@ -54,8 +78,31 @@ export function CreateShipmentScreen() {
 
   const requestQuote = quote.mutate;
   useEffect(() => {
-    if (destinationZoneId && pickupZoneId) requestQuote({ destinationZoneId });
-  }, [destinationZoneId, pickupZoneId, requestQuote]);
+    if (destinationZoneId && pickupZoneId && !createBlocked) requestQuote({ destinationZoneId });
+  }, [destinationZoneId, pickupZoneId, requestQuote, createBlocked]);
+
+  /** The price moved or the quote expired: fetch a fresh one for the merchant to confirm. */
+  function onCreateError(error: unknown) {
+    applyApiError(error);
+    if (
+      error instanceof ApiError &&
+      ['PRICE_CHANGED', 'QUOTE_INVALID'].includes(error.body.code) &&
+      destinationZoneId
+    ) {
+      requestQuote({ destinationZoneId });
+    }
+  }
+
+  function onCreated(shipment: ShipmentDetails, addAnother: boolean) {
+    if (addAnother) {
+      // Keep the area and city: consecutive shipments often go to the same place.
+      setForm((current) => ({ ...EMPTY, city: current.city }));
+      setCreated(shipment.trackingNumber);
+      requestQuote({ destinationZoneId });
+    } else {
+      router.replace({ pathname: '/shipments/[id]', params: { id: shipment.id } });
+    }
+  }
 
   function submit(addAnother: boolean) {
     // The previous "created" notice belongs to the previous shipment.
@@ -66,29 +113,35 @@ export function CreateShipmentScreen() {
       quoteId: quote.data?.quoteId ?? undefined,
     });
     if (!values) return;
+    if (guard.active) {
+      create.reset();
+      setReviewing({ values, addAnother });
+      return;
+    }
     create.mutate(values, {
-      onError: (error) => {
-        applyApiError(error);
-        // The price moved or the quote expired: fetch a fresh one for the merchant to confirm.
-        if (
-          error instanceof ApiError &&
-          ['PRICE_CHANGED', 'QUOTE_INVALID'].includes(error.body.code) &&
-          destinationZoneId
-        ) {
-          requestQuote({ destinationZoneId });
-        }
-      },
-      onSuccess: (shipment) => {
-        if (addAnother) {
-          // Keep the area and city: consecutive shipments often go to the same place.
-          setForm((current) => ({ ...EMPTY, city: current.city }));
-          setCreated(shipment.trackingNumber);
-          requestQuote({ destinationZoneId });
-        } else {
-          router.replace({ pathname: '/shipments/[id]', params: { id: shipment.id } });
-        }
-      },
+      onError: onCreateError,
+      onSuccess: (shipment) => onCreated(shipment, addAnother),
     });
+  }
+
+  /** The write behind the confirmation sheet; a stale quote sends the merchant back first. */
+  async function confirmCreate(confirmationToken: string) {
+    if (!reviewing) return;
+    try {
+      const shipment = await create.mutateAsync({ ...reviewing.values, confirmationToken });
+      setReviewing(null);
+      onCreated(shipment, reviewing.addAnother);
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        ['PRICE_CHANGED', 'QUOTE_INVALID'].includes(error.body.code)
+      ) {
+        setReviewing(null);
+        onCreateError(error);
+        return;
+      }
+      throw error;
+    }
   }
 
   if (!pickupZoneId) {
@@ -105,16 +158,22 @@ export function CreateShipmentScreen() {
         ) : (
           <>
             <Banner message={t('errors.ORIGIN_ZONE_REQUIRED')} />
-            <ChoiceField
-              label={t('pricing.pickupTitle')}
-              placeholder={t('zones.choose')}
-              searchPlaceholder={t('zones.search')}
-              options={options}
-              value=""
-              onChange={(zoneId) => requestPickup.mutate(zoneId)}
-              testID="pickup-zone"
-            />
-            <AppText variant="muted">{t('pricing.pickupHint')}</AppText>
+            {pickupBlocked ? (
+              <Banner tone="info" message={pickupBlocked} />
+            ) : (
+              <>
+                <ChoiceField
+                  label={t('pricing.pickupTitle')}
+                  placeholder={t('zones.choose')}
+                  searchPlaceholder={t('zones.search')}
+                  options={options}
+                  value=""
+                  onChange={(zoneId) => requestPickup.mutate(zoneId)}
+                  testID="pickup-zone"
+                />
+                <AppText variant="muted">{t('pricing.pickupHint')}</AppText>
+              </>
+            )}
           </>
         )}
         <ErrorBanner error={requestPickup.error ?? pickup.error ?? zones.error} />
@@ -124,6 +183,7 @@ export function CreateShipmentScreen() {
 
   return (
     <Screen>
+      {createBlocked ? <Banner tone="info" message={createBlocked} /> : null}
       {created ? (
         <Banner tone="success" message={t('shipments.created', { tracking: created })} />
       ) : null}
@@ -165,7 +225,9 @@ export function CreateShipmentScreen() {
       />
       <Section>
         <AppText variant="label">{t('pricing.estimated')}</AppText>
-        {!destinationZoneId ? (
+        {createBlocked ? (
+          <AppText variant="muted">{t('impersonation.charges.noQuote')}</AppText>
+        ) : !destinationZoneId ? (
           <AppText variant="muted">{t('pricing.chooseDestination')}</AppText>
         ) : quote.isPending ? (
           <AppText variant="muted">{t('pricing.calculating')}</AppText>
@@ -232,19 +294,34 @@ export function CreateShipmentScreen() {
         error={fieldErrors.merchantNotes}
       />
       <AppButton
-        title={t('shipments.createSubmit')}
+        title={guard.active ? t('impersonation.charges.review') : t('shipments.createSubmit')}
         onPress={() => submit(false)}
-        loading={create.isPending}
+        loading={create.isPending && !reviewing}
         disabled={!quote.data}
+        disabledReason={createBlocked}
         testID="shipment-submit"
       />
       <AppButton
         variant="outline"
         title={t('shipments.createAnother')}
         onPress={() => submit(true)}
-        disabled={create.isPending || !quote.data}
+        disabled={create.isPending || !quote.data || Boolean(createBlocked)}
         testID="shipment-submit-another"
       />
+      {reviewing ? (
+        <ConsequenceSheet
+          title={t('shipments.newShipment')}
+          load={() =>
+            previews.forCreate({
+              destinationZoneId: reviewing.values.destinationZoneId,
+              codAmount: reviewing.values.codAmount,
+              quoteId: reviewing.values.quoteId,
+            })
+          }
+          confirm={confirmCreate}
+          onClose={() => setReviewing(null)}
+        />
+      ) : null}
     </Screen>
   );
 }

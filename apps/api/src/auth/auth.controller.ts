@@ -105,6 +105,7 @@ export class AuthController {
           this.prisma.client,
           auth.acting.impersonation.id,
           this.clock.now(),
+          this.config,
         )
       : null;
     return {

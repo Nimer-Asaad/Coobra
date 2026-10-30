@@ -64,8 +64,9 @@ export class AuditLogService {
       include: { actor: personSelect, target: personSelect },
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
+    const effective = await this.effectiveUsers(rows);
     return {
-      items: ids.map(({ id }) => this.toListItem(byId.get(id)!)),
+      items: ids.map(({ id }) => this.toListItem(byId.get(id)!, effective)),
       page: query.page,
       pageSize: query.pageSize,
       total: counted[0]?.total ?? 0,
@@ -83,7 +84,7 @@ export class AuditLogService {
     const { value, redacted } = redactMetadata(row.metadata);
     const { changes, details } = splitChanges(value);
     return {
-      ...this.toListItem(row),
+      ...this.toListItem(row, await this.effectiveUsers([row])),
       ipAddress: row.ipAddress,
       userAgent: row.userAgent,
       changes,
@@ -92,7 +93,18 @@ export class AuditLogService {
     };
   }
 
-  private toListItem(row: Row): AuditLogListItem {
+  /** The accounts acted as (ADR 0003 §11.1), loaded once per page. */
+  private async effectiveUsers(rows: Row[]): Promise<Map<string, AuditPerson>> {
+    const ids = [...new Set(rows.flatMap((row) => row.effectiveUserId ?? []))];
+    if (!ids.length) return new Map();
+    const users = await this.prisma.client.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, fullName: true, role: true },
+    });
+    return new Map(users.map((user) => [user.id, person(user)!]));
+  }
+
+  private toListItem(row: Row, effective: Map<string, AuditPerson>): AuditLogListItem {
     const { value } = redactMetadata(row.metadata);
     return {
       id: row.id,
@@ -103,6 +115,8 @@ export class AuditLogService {
       targetUser: person(row.target),
       entity: auditEntity(value, row.targetUserId),
       summary: auditSummary(value),
+      effectiveUser: row.effectiveUserId ? (effective.get(row.effectiveUserId) ?? null) : null,
+      impersonationId: row.impersonationId,
     };
   }
 
@@ -116,6 +130,14 @@ export class AuditLogService {
     if (query.actorId) conditions.push(Prisma.sql`a.actor_user_id = ${query.actorId}::uuid`);
     if (query.targetUserId) {
       conditions.push(Prisma.sql`a.target_user_id = ${query.targetUserId}::uuid`);
+    }
+    if (query.impersonationId) {
+      // Entries made during it (column) and its own start/end events (metadata); both indexed.
+      conditions.push(
+        Prisma.sql`(a.impersonation_id = ${query.impersonationId}::uuid OR a.metadata @> ${JSON.stringify(
+          { impersonationId: query.impersonationId },
+        )}::jsonb)`,
+      );
     }
     if (query.from) conditions.push(Prisma.sql`a.created_at >= ${new Date(query.from)}`);
     if (query.to) conditions.push(Prisma.sql`a.created_at < ${new Date(query.to)}`);

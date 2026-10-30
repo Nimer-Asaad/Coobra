@@ -739,8 +739,8 @@ the URL` runs close to Vitest's 5-second limit under a fully parallel run and al
 | 4C.1  | Migration 14, shared contracts, route classification, route-coverage and schema tests     | Done; approved at `1b7c0ab`; applied to the local development database (§17) |
 | 4C.2  | `ActingContext` and request context everywhere; impersonation not yet possible            | Done; approved at `bfd1b21` (§18)                                            |
 | 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | Done; approved at `de7506b` (§19, §20)                                       |
-| 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | **Done; awaiting owner review** (§21)                                        |
-| 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | UI tests in Arabic and English                                               |
+| 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | Done; approved at `bef8bc9` (§21)                                            |
+| 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | **Done; awaiting owner review** (§22)                                        |
 | 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | Owner reviews the PR                                                         |
 
 ## 17. Phase 4C.1 validation record (2026-10-30)
@@ -937,3 +937,54 @@ transitions, deactivation racing a write without deadlock, audit-failure rollbac
 disabled, R1 after the end, fee override, adjustment independence and provenance validation, and
 unchanged normal behaviour, with every ledger and money table unchanged. Unit tests cover the key
 ring and the signer (tamper, unknown key, expiry, rotation, canonical form).
+
+## 22. Phase 4C.5 record (2026-10-30)
+
+**Admin console.** A merchant's or driver's page offers "Act as this account" to SUPER_ADMINs; it
+stays visible but disabled, with the reason, for staff, disabled accounts, an account another
+admin is using, or while the admin already has a session. The start dialog asks for the reason,
+an optional ticket and the password; the app tab is opened inside the click (no `noopener`), the
+step-up runs while the tab loads, and the start happens only after the tab announced its
+challenge. Messages are accepted only from the opened window at the app's exact origin, and the
+code is posted only to that origin. Without the tab's success message within 20 seconds, or if
+the tab closes, the console ends the impersonation: a failed hand-off never leaves one active.
+Every console page shows the admin's active session (target, time left by the server's clock,
+End). The audit viewer shows "acting as {account}", filters one impersonation (its start and end
+included) and links to it from the entry dialog. The finance review form links an adjustment to
+a shipment (by tracking number), a return charge, a COD shortfall or a journal entry, or leaves it
+unlinked with the independent-reviewer note; the list shows each adjustment's link.
+
+**Merchant and driver web apps.** `/impersonate` runs the tab side: a verifier in memory only, the
+challenge to the opener, the code only from the opener at the console's exact origin
+(`EXPO_PUBLIC_ADMIN_WEB_URL`), the exchange, then `window.opener = null`. That tab never loads
+the browser's real session. Only a marker (`active` or `ended`) is kept, in this tab's
+`sessionStorage`; with it every request sends the impersonation header, and a 401 ends the
+impersonation in the tab instead of falling back to `coobra_session`. Other tabs keep the real
+session. A banner on every screen, never dismissable, shows the account, the admin, the time
+left (server clock; announced to screen readers at 5 and 1 minutes only) and End with a
+confirmation; the tab checks every 30 seconds whether the impersonation is still active. The
+ended screen survives reloads. "View only" is shown when writes are off. Language changes stay
+in the tab (preferences are never changed); signing out ends the impersonation.
+
+**Restrictions and confirmations.** Blocked actions are disabled with their reason, from the
+shared policy tables (`impersonationRouteBlock`, `impersonationTransitionCapability`): delivery,
+COD collection, settlement, payouts and their cancellation, shortfall answers and pickup-zone
+changes; everything safeguarded when writes are off. Impersonated driver steps require a reason.
+Actions with consequences open one confirmation sheet with the server's signed charges
+(fixed, estimate or undecided; when they are charged; validity countdown). An expired preview can
+only be refreshed; a 409 `CONSEQUENCE_CHANGED` or 400 reloads the charges and shows what changed;
+a stale quote (`PRICE_CHANGED`, `QUOTE_INVALID`) sends the merchant back to the form with the new
+price. Normal merchant and driver flows are unchanged.
+
+**API (owner-approved, additive, read-only).** `writesEnabled` on `ImpersonationInfo`;
+`sourceType`, `sourceShipment` and `sourceJournalEntryId` on admin adjustment items;
+`effectiveUser` and `impersonationId` on audit entries and an `impersonationId` audit filter.
+No write path, authorization rule or schema changed; no migration.
+
+**Validation.** Component tests (Arabic and English) for the hand-off on both sides, the banner,
+the confirmation sheet, blocked actions, the admin start dialog and action states, the active
+session bar, the audit display and adjustment provenance; integration assertions for the three
+API additions; end-to-end journeys in the isolated stack (writes enabled there only, random key
+per run): admin to merchant and admin to driver, tab isolation, the real session untouched, a
+price change mid-confirmation, blocked actions, ending from the banner and from the console, and
+the hand-off page refusing to work without the console.

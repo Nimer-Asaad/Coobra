@@ -11,6 +11,7 @@ import type {
 } from '@coobra/shared';
 import { useApi } from './api-context';
 import { useMobileConfig } from './config';
+import { useImpersonationStore } from './impersonation/store';
 import { useLanguageStore } from './state/language-store';
 import { useSessionStore } from './state/session-store';
 
@@ -55,7 +56,16 @@ export function useRegisterMerchant() {
 export function useLogout() {
   const api = useApi();
   return useMutation({
-    mutationFn: () => api.request<void>('/v1/auth/logout', { method: 'POST' }),
+    mutationFn: async () => {
+      // In an impersonation tab, signing out ends the impersonation (never the account's own
+      // sessions); the tab then shows "session ended".
+      if (useImpersonationStore.getState().mode === 'active') {
+        await api.request('/v1/impersonation/end', { method: 'POST' }).catch(() => undefined);
+        useImpersonationStore.getState().end('MANUAL');
+        return;
+      }
+      await api.request<void>('/v1/auth/logout', { method: 'POST' });
+    },
     // Always clear the local session, even if the server is unreachable.
     onSettled: () => useSessionStore.getState().signOut(),
   });
@@ -115,6 +125,12 @@ export function useChangeLanguage() {
   const api = useApi();
   return useMutation({
     mutationFn: async (language: Language) => {
+      // During an impersonation the language changes in this tab only (D13: the account's
+      // preferences are never changed by an admin).
+      if (useImpersonationStore.getState().mode === 'active') {
+        useLanguageStore.getState().setForThisTab(language);
+        return;
+      }
       await useLanguageStore.getState().setLanguage(language);
       if (useSessionStore.getState().status === 'signedIn') {
         const user = await api.request<AuthUser>('/v1/me/preferences', {

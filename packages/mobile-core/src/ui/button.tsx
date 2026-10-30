@@ -1,4 +1,6 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { useId } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppText } from './text';
 import { colors, radius, spacing } from './theme';
 
 interface AppButtonProps {
@@ -7,6 +9,8 @@ interface AppButtonProps {
   variant?: 'primary' | 'outline' | 'link';
   loading?: boolean;
   disabled?: boolean;
+  /** Disables the button and says why, next to it (also read by screen readers). */
+  disabledReason?: string;
   testID?: string;
 }
 
@@ -16,16 +20,19 @@ export function AppButton({
   variant = 'primary',
   loading,
   disabled,
+  disabledReason,
   testID,
 }: AppButtonProps) {
-  const inactive = disabled || loading;
-  return (
+  const reasonId = useId();
+  const inactive = disabled || loading || Boolean(disabledReason);
+  const button = (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={title}
       // aria-* (not accessibilityState) so busy/disabled also reach the web build.
       aria-disabled={Boolean(inactive)}
       aria-busy={Boolean(loading)}
+      aria-describedby={disabledReason ? reasonId : undefined}
       onPress={onPress}
       disabled={inactive}
       testID={testID}
@@ -47,6 +54,15 @@ export function AppButton({
       )}
     </Pressable>
   );
+  if (!disabledReason) return button;
+  return (
+    <View style={styles.group}>
+      {button}
+      <AppText variant="muted" nativeID={reasonId} testID={testID ? `${testID}-reason` : undefined}>
+        {disabledReason}
+      </AppText>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -65,4 +81,5 @@ const styles = StyleSheet.create({
   text: { fontSize: 16, fontWeight: '600' },
   primaryText: { color: colors.primaryText },
   secondaryText: { color: colors.primary },
+  group: { gap: spacing.xs },
 });

@@ -231,6 +231,33 @@ describe('Impersonated writes (PostgreSQL integration)', () => {
         effectiveUserId: merchant.id,
         impersonationId: impId,
       });
+      // Phase 4C.5 display contract: the tab knows writes are on, and the audit viewer shows
+      // "{admin} acting as {merchant}" and filters one impersonation (its start included).
+      expect((await as.get('/v1/auth/me').expect(200)).body.impersonation.writesEnabled).toBe(true);
+      const viewer = await bearer(admin)
+        .get(`/v1/admin/audit-logs?impersonationId=${impId}`)
+        .expect(200);
+      expect(viewer.body.items.map((item: { action: string }) => item.action)).toEqual(
+        expect.arrayContaining(['SHIPMENT_CREATED', 'IMPERSONATION_STARTED']),
+      );
+      const shown = viewer.body.items.find(
+        (item: { action: string }) => item.action === 'SHIPMENT_CREATED',
+      );
+      expect(shown).toMatchObject({
+        actor: { id: admin.id },
+        effectiveUser: { id: merchant.id, role: 'MERCHANT' },
+        impersonationId: impId,
+      });
+      const detail = await bearer(admin).get(`/v1/admin/audit-logs/${shown.id}`).expect(200);
+      expect(detail.body.effectiveUser).toMatchObject({ id: merchant.id });
+      // The start itself was done as the admin (outside the impersonation).
+      const ordinary = await bearer(admin)
+        .get('/v1/admin/audit-logs?action=IMPERSONATION_STARTED')
+        .expect(200);
+      expect(ordinary.body.items.length).toBeGreaterThan(0);
+      for (const item of ordinary.body.items) {
+        expect(item).toMatchObject({ effectiveUser: null, impersonationId: null });
+      }
       expect(await moneySnapshot()).toEqual(before);
     });
 
@@ -739,6 +766,17 @@ describe('Impersonated writes (PostgreSQL integration)', () => {
         sourceShipmentId: created.body.id,
       }).expect(201);
       const unlinked = await ask({}).expect(201);
+      // Phase 4C.5: reviewers see what each adjustment is linked to.
+      expect(linked.body).toMatchObject({
+        sourceType: 'SHIPMENT_FEE',
+        sourceShipment: { id: created.body.id, trackingNumber: created.body.trackingNumber },
+        sourceJournalEntryId: null,
+      });
+      expect(unlinked.body).toMatchObject({ sourceType: 'UNLINKED', sourceShipment: null });
+      const listed = await bearer(accountant).get('/v1/admin/finance/adjustments').expect(200);
+      expect(
+        listed.body.find((item: { id: string }) => item.id === linked.body.id).sourceShipment,
+      ).toEqual({ id: created.body.id, trackingNumber: created.body.trackingNumber });
       for (const adjustment of [linked.body, unlinked.body]) {
         const res = await bearer(admin).post(
           `/v1/admin/finance/adjustments/${adjustment.id}/approve`,
