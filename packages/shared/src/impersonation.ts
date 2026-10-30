@@ -118,6 +118,18 @@ export const IMPERSONATION_ROUTE_POLICY = {
   'PATCH /v1/me/preferences': forbidden('TARGET_SETTINGS'),
   'GET /v1/zones': read,
 
+  // --- Impersonation lifecycle (Phase 4C.3) -----------------------------------------------
+  /** The opened app tab redeems its single-use code (code + verifier, exact app origin). */
+  'POST /v1/auth/impersonation/exchange': publicRoute,
+  /** The banner's End button. */
+  'POST /v1/impersonation/end': { access: 'ALLOWED', basis: 'ENDS_IMPERSONATION' },
+  /** Step-up and the admin console's controls are SUPER_ADMIN routes: never during impersonation. */
+  'POST /v1/auth/reauthenticate': staffOnly,
+  'POST /v1/admin/impersonations': staffOnly,
+  'GET /v1/admin/impersonations': staffOnly,
+  'GET /v1/admin/impersonations/:id': staffOnly,
+  'POST /v1/admin/impersonations/:id/end': staffOnly,
+
   // --- Merchant app -----------------------------------------------------------------------------
   'GET /v1/merchant/shipments': read,
   'GET /v1/merchant/shipments/:id': read,
@@ -491,3 +503,20 @@ export interface ImpersonationInfo {
   /** Server clock, so the countdown does not depend on the client's clock. */
   serverNow: string;
 }
+
+/** `POST /v1/admin/impersonations`: the code goes to the opened tab by postMessage only. */
+export interface ImpersonationStartResponse {
+  impersonation: ImpersonationInfo;
+  /** Single-use, valid 60 seconds; bound to the tab's verifier. Never put it in a URL. */
+  code: string;
+  /** The origin the code may be redeemed from (the target's app). */
+  appOrigin: string;
+}
+
+export const listImpersonationsQuerySchema = z.object({
+  active: z
+    .enum(['true', 'false'], { error: 'validation.required' })
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
+});
+export type ListImpersonationsQuery = z.infer<typeof listImpersonationsQuerySchema>;

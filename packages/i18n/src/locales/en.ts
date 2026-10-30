@@ -1071,5 +1071,22 @@ export const en = {
       subject: 'Your COOBRA account',
       body: 'An account has been created for you. Set your password by opening this link (valid for {{hours}} hours):',
     },
+    impersonationSummary: {
+      subject: 'A COOBRA administrator accessed your account',
+      intro:
+        'A COOBRA administrator, {{name}}, accessed your account to help you from {{start}} to {{end}}.',
+      endedBecause: 'Access ended: {{reason}}.',
+      endReasons: {
+        MANUAL: 'it was ended by hand',
+        EXPIRED: 'the 30-minute limit was reached',
+        ACTOR_LOGOUT: 'the administrator signed out',
+        ACTOR_SESSION_ENDED: "the administrator's session ended",
+        ACTOR_REVOKED: "the administrator's access changed",
+        TARGET_REVOKED: 'your account access changed',
+      },
+      actionsTitle: 'Actions taken in your account:',
+      noActions: 'No changes were made to your account.',
+      contact: 'If you did not expect this, contact COOBRA support.',
+    },
   },
 };

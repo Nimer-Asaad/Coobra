@@ -10,6 +10,7 @@ import { ThrottlerException } from '@nestjs/throttler';
 import type { Response } from 'express';
 import type { ApiErrorBody, ErrorCode } from '@coobra/shared';
 import { AppException } from './app-exception.js';
+import { redactForLog } from './log-redaction.js';
 
 const STATUS_CODES: Partial<Record<number, ErrorCode>> = {
   [HttpStatus.UNAUTHORIZED]: 'UNAUTHENTICATED',
@@ -27,7 +28,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<Response>();
     const body = this.toBody(exception);
     if (body.statusCode >= 500) {
-      this.logger.error(exception instanceof Error ? exception.stack : String(exception));
+      this.logger.error(redactForLog(exception));
     }
     response.status(body.statusCode).json(body);
   }

@@ -94,8 +94,9 @@ describe('impersonation route policy', () => {
     }
   });
 
-  it('permits writes only as SAFEGUARDED, apart from logout (which ends the impersonation)', () => {
-    const readOnlyWrites = ['POST /v1/auth/logout'];
+  it('permits writes only as SAFEGUARDED, apart from logout and End (which end the impersonation)', () => {
+    // Both only end the impersonation.
+    const readOnlyWrites = ['POST /v1/auth/logout', 'POST /v1/impersonation/end'];
     for (const [route, policy] of Object.entries(routes)) {
       const write = !route.startsWith('GET ');
       if (write && policy.access === 'ALLOWED') expect(readOnlyWrites, route).toContain(route);

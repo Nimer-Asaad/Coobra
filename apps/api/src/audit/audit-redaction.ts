@@ -74,6 +74,10 @@ const ALLOWED_KEYS = new Set([
   'language',
   'clientApp',
   'sessionsRevoked',
+  // Phase 4C impersonation events.
+  'endReason',
+  'targetRole',
+  'expiresAt',
   'via',
   'reason',
   'note',

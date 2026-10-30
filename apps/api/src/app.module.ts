@@ -5,6 +5,8 @@ import { AuditModule } from './audit/audit.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthModule } from './auth/auth.module.js';
 import { ActingContextInterceptor } from './common/acting-context.js';
+import { ClockModule } from './common/clock.js';
+import { ImpersonationModule } from './impersonation/impersonation.module.js';
 import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
 import { ConfigModule } from './config/config.module.js';
 import { APP_CONFIG, type AppConfig } from './config/env.js';
@@ -34,6 +36,8 @@ import { UsersModule } from './users/users.module.js';
     PricingModule,
     FinanceModule,
     ShipmentsModule,
+    ClockModule,
+    ImpersonationModule,
   ],
   controllers: [HealthController],
   providers: [

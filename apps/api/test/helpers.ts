@@ -60,6 +60,8 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
     DRIVER_APP_URL: 'http://localhost:8081',
     MAIL_FROM: 'COOBRA Test <test@coobra.local>',
     RATE_LIMIT_ENABLED: 'false',
+    // Tests run the sweeper explicitly (ImpersonationSweeper.runOnce).
+    IMPERSONATION_SWEEPER_ENABLED: 'false',
     ...overrides,
   });
   const mail = new CapturingMailTransport();

@@ -150,7 +150,7 @@ export class AuthService {
   }
 
   async logout(userId: string, sessionId: string, meta: RequestMeta): Promise<void> {
-    await this.sessions.revoke(sessionId);
+    await this.sessions.revoke(sessionId, meta);
     await this.audit.record({
       action: 'AUTH_LOGOUT',
       actorUserId: userId,

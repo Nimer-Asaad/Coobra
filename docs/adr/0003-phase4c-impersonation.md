@@ -737,8 +737,8 @@ the URL` runs close to Vitest's 5-second limit under a fully parallel run and al
 | ----- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | 4C.0  | This ADR and the revised `docs/impersonation.md`                                          | Done; owner approved on 2026-10-30                                           |
 | 4C.1  | Migration 14, shared contracts, route classification, route-coverage and schema tests     | Done; approved at `1b7c0ab`; applied to the local development database (§17) |
-| 4C.2  | `ActingContext` and request context everywhere; impersonation not yet possible            | **Done; awaiting owner review** (§18)                                        |
-| 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | Security, concurrency, session and outbox tests                              |
+| 4C.2  | `ActingContext` and request context everywhere; impersonation not yet possible            | Done; approved at `bfd1b21` (§18)                                            |
+| 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | **Done; awaiting owner review** (§19)                                        |
 | 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | Conflict-of-interest and financial-invariant tests                           |
 | 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | UI tests in Arabic and English                                               |
 | 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | Owner reviews the PR                                                         |
@@ -798,3 +798,96 @@ database: typecheck 12/12; unit tests 208/208 (47 in the API, including 9 for th
 context, the ledger stop, audit stamping and the session refusal); integration 160/160 (including
 `acting-context.integration-spec.ts`: unchanged attribution for merchant, staff and driver
 writes, COD postings and quotes, scoping, and refusal of an impersonation session).
+
+## 19. Phase 4C.3 record (2026-10-30)
+
+**Backend lifecycle only; every impersonated write is still forbidden.** No migration was added
+(migration 14 already holds every table and rule).
+
+| Piece            | Implementation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Routes           | `POST /v1/auth/reauthenticate`, `POST /v1/admin/impersonations`, `GET /v1/admin/impersonations`, `GET /v1/admin/impersonations/:id`, `POST /v1/admin/impersonations/:id/end` (SUPER_ADMIN, ordinary admin session only); `POST /v1/auth/impersonation/exchange` (public, code-bound); `POST /v1/impersonation/end` (the banner). The registry now classifies 111 routes                                                                                                                                            |
+| Step-up          | Password re-entry on the admin session, audited (`AUTH_REAUTHENTICATED` / `_FAILED`), rate limited, valid 5 minutes, used up inside the start transaction (kept if the start fails)                                                                                                                                                                                                                                                                                                                                |
+| Start            | Actor and target rows locked in id order; expired rows closed first; database slots map to `409 IMPERSONATION_ACTIVE`; 30-minute absolute expiry; single-use 60-second code bound to the tab's verifier challenge; `Cache-Control: no-store`                                                                                                                                                                                                                                                                       |
+| Exchange         | Custom header and exact app origin required; code claimed by one conditional update (a wrong verifier still burns it); impersonation, actor, admin session and target re-validated under a row lock; the temporary session expires with the impersonation; token only in the httpOnly `SameSite=Strict`, host-only impersonation cookie                                                                                                                                                                            |
+| Every request    | Recognised only by the header; cookie only, never a bearer; exact app origin for every method (stricter than CORS, and covering sibling subdomains); session, impersonation, actor, admin session and target re-validated; deny by default (only routes classified `ALLOWED`); `@Roles` still checked against the target                                                                                                                                                                                           |
+| Ending           | One conditional update, so ending is idempotent under any concurrency; revokes the temporary session, audits `IMPERSONATION_ENDED` and queues the summary in the same transaction. Triggers: banner, admin console, logout inside the impersonation (the account's own sessions untouched), admin logout (`ACTOR_LOGOUT`), admin session ended (`ACTOR_SESSION_ENDED`), actor or target deactivated, role change or password reset (`ACTOR_REVOKED` / `TARGET_REVOKED`, in the 4A transaction), expiry (`EXPIRED`) |
+| Sweeper          | On every instance, every 60 s, `FOR UPDATE SKIP LOCKED`; ends expired impersonations and those whose admin session ended; then delivers summaries                                                                                                                                                                                                                                                                                                                                                                  |
+| Outbox           | Per-row lease with its own fencing token (`gen_random_uuid()`), completion only by the token holder, backoff 1/2/4/8 minutes, `FAILED` after 5 attempts, sanitised `last_error` (error type only). At-least-once: the stable `Message-ID` helps mail clients recognise a resend but does not prevent one                                                                                                                                                                                                           |
+| Email            | Arabic and English, safe allowlist: administrator's name, times (UTC), end reason, actions taken (label, time, tracking number). Never the support reason, ticket, IP address, links or codes                                                                                                                                                                                                                                                                                                                      |
+| Defence in depth | The ledger refusal and audit stamping from Phase 4C.2 stay active; no secret (password, code, verifier, token, cookie) is logged                                                                                                                                                                                                                                                                                                                                                                                   |
+
+**Validation.** `impersonation-lifecycle.integration-spec.ts` (17 tests, 24 after the security gate in §20): start and hand-off,
+step-up (missing, wrong, expired, consumed), refused targets, one active per actor and target
+including a race, exchange origin/header/verifier/replay/after-end, deny-by-default for writes,
+money, settings and staff routes, header/origin/cookie/bearer rules, the 30-minute limit and
+sweeper expiry, banner/admin/racing ends, logout, admin logout and admin session end, target
+and actor deactivation, the summary email, retries and failure, lease fencing, and unchanged
+ledger and money tables.
+
+## 20. Phase 4C.3 security gate (2026-10-30)
+
+**R4 enforced (fail closed).** `impersonationDeployment()` (`apps/api/src/config/env.ts`) runs at
+start-up. In production impersonation is enabled only when `COOKIE_SECURE=true`,
+`IMPERSONATION_SITE` names an approved domain (not an IP or `localhost`), and `API_PUBLIC_URL`,
+`ADMIN_WEB_URL`, `MERCHANT_APP_URL` and `DRIVER_APP_URL` are all HTTPS on that site or a
+subdomain of it (a look-alike such as `evilcoobra.ps` does not match `coobra.ps`). Otherwise the
+guard refuses every impersonated request and step-up, start and exchange return
+`403 IMPERSONATION_NOT_ALLOWED`; the rest of the API runs normally and the problems are logged by
+setting name at start-up. The site is set explicitly because registrable domains depend on the
+public suffix list. Development and test are not checked, so `http://localhost` keeps working.
+
+**Distributed rate limiting.**
+
+| Operation               | Production control                                                                                                                                                                                                                                      | Shared across instances                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Password step-up        | Database-backed lockout: at most 5 failed attempts per user in 15 minutes, then `429` even with the right password. Failures are the audit entries; a per-user `pg_advisory_xact_lock` serialises attempts, so a parallel burst cannot exceed the limit | Yes (tested with two API instances on one database) |
+| Code exchange           | Not a guessing target: 256-bit code, single use (a wrong verifier burns it), 60 seconds, bound to the tab's verifier and the exact origin. The per-instance throttle (10/minute) is only a cost control                                                 | Not needed for security                             |
+| Start, admin reads/ends | Require an authenticated SUPER_ADMIN session and a consumed step-up                                                                                                                                                                                     | Through the step-up                                 |
+
+Remaining per-instance limits (the `@nestjs/throttler` in-memory store: login, password reset,
+exchange cost control) are not a security dependency of impersonation. **Production
+requirement:** before running more than one API instance, replace the in-memory throttler store
+with a shared one. Ready-to-implement design (needs owner approval; it adds migration 15):
+
+```sql
+-- Migration 15 (proposed, not created): fixed-window counters shared by every instance.
+CREATE TABLE "rate_limit_hits" (
+  "key"          TEXT        NOT NULL,   -- e.g. 'login:ip:203.0.113.7'
+  "window_start" TIMESTAMP(3) NOT NULL,
+  "hits"         INTEGER     NOT NULL DEFAULT 0,
+  CONSTRAINT "rate_limit_hits_pkey" PRIMARY KEY ("key", "window_start")
+);
+CREATE INDEX "rate_limit_hits_window_start_idx" ON "rate_limit_hits"("window_start");
+```
+
+`PostgresThrottlerStorage implements ThrottlerStorage`: `increment(key, ttl, limit, blockDuration,
+name)` runs
+`INSERT … ON CONFLICT ("key","window_start") DO UPDATE SET hits = rate_limit_hits.hits + 1 RETURNING hits`
+for the current window, and returns `{ totalHits, timeToExpire, isBlocked, timeToBlockExpire }`
+from it. The existing sweeper deletes windows older than a day. It is registered with
+`ThrottlerModule.forRootAsync({ storage: new PostgresThrottlerStorage(prisma) })`; tests run two
+app instances against one database, as the step-up test already does. A managed Redis store
+(`@nest-lab/throttler-storage-redis`) is the alternative if Redis becomes part of the platform.
+
+**Expired and revoked sessions.** Every request re-validates the session, the impersonation,
+the actor, the actor's admin session and the target; the comparison is strict (`expiresAt <= now`
+refuses), and the tests cover the exact expiry instant, a revoked temporary session, a disabled
+target, an actor who lost SUPER_ADMIN, an expired admin session, and requests started after an
+end committed while other requests were in flight. A read already in progress when an end
+commits may finish; every write is refused during impersonation in this phase, and Phase 4C.4
+re-checks the impersonation `FOR SHARE` inside each permitted write's transaction.
+
+**Writes stay blocked; ordinary permissions unchanged.** A test sends every non-GET route the
+API registers (63) as an impersonated request and requires `403 IMPERSONATION_FORBIDDEN_ACTION`
+for all but logout and End, with every ledger and money table unchanged. Another shows that the
+impersonated merchant's own session, admins, accountants and drivers keep exactly their
+permissions while an impersonation runs.
+
+**No secrets in logs.** Raw passwords, codes, verifiers, tokens and cookies are never passed to a
+query or a logger. Every error the API logs (the exception filter, audit, mail, user setup, the
+sweeper) goes through `redactForLog`, which removes password hashes, token and code hashes,
+bearer values, cookies, secret fields and long opaque tokens from error text, including Prisma
+error messages that print query arguments. A test captures the process output across a whole
+lifecycle with failures and finds none of the secrets. The development-only log mail transport
+prints email links and is refused in production by configuration.

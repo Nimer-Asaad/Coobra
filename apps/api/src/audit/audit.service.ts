@@ -4,6 +4,7 @@ import type { AuditAction } from '@coobra/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { RequestMeta } from '../common/request.js';
 import { currentActingContext } from '../common/acting-context.js';
+import { redactForLog } from '../common/log-redaction.js';
 
 /** The action list lives in @coobra/shared so the audit log viewer can label and filter it. */
 export type { AuditAction };
@@ -15,6 +16,8 @@ export interface AuditEntry {
   targetUserId?: string | null;
   meta?: RequestMeta;
   metadata?: Prisma.InputJsonObject;
+  /** When it happened, if the caller compares it with its own clock (rate limits); else now. */
+  at?: Date;
 }
 
 @Injectable()
@@ -28,7 +31,7 @@ export class AuditService {
     try {
       await this.recordIn(this.prisma.client, entry);
     } catch (error) {
-      this.logger.error(`Failed to write audit log ${entry.action}`, error as Error);
+      this.logger.error(`Failed to write audit log ${entry.action}: ${redactForLog(error)}`);
     }
   }
 
@@ -53,6 +56,7 @@ export class AuditService {
         ipAddress: entry.meta?.ipAddress ?? null,
         userAgent: entry.meta?.userAgent ?? null,
         metadata: entry.metadata,
+        ...(entry.at ? { createdAt: entry.at } : {}),
       },
     });
   }

@@ -21,6 +21,12 @@ const envSchema = z
     SESSION_TTL_DAYS_MOBILE: z.coerce.number().positive().default(30),
     COOKIE_SECURE: booleanString.default(false),
     RATE_LIMIT_ENABLED: booleanString.default(true),
+    /** Phase 4C: closes expired impersonations and sends their summaries (every instance). */
+    IMPERSONATION_SWEEPER_ENABLED: booleanString.default(true),
+    /** Production impersonation (ADR 0003 R4): the API's public HTTPS URL. */
+    API_PUBLIC_URL: z.url().optional(),
+    /** Production impersonation (R4): the approved site every host belongs to, e.g. coobra.ps. */
+    IMPERSONATION_SITE: z.string().trim().toLowerCase().optional(),
     ADMIN_WEB_URL: z.url(),
     MERCHANT_APP_URL: z.url(),
     DRIVER_APP_URL: z.url(),
@@ -64,6 +70,9 @@ export interface AppConfig {
     cookieSecure: boolean;
   };
   rateLimitEnabled: boolean;
+  impersonationSweeperEnabled: boolean;
+  /** ADR 0003 R4: impersonation fails closed in production unless the deployment qualifies. */
+  impersonation: { enabled: boolean; problems: string[] };
   links: {
     adminWebUrl: string;
     merchantAppUrl: string;
@@ -83,6 +92,56 @@ export interface AppConfig {
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
+
+const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+
+/**
+ * ADR 0003 R4. In production the impersonation cookie is only safe when the API and every web
+ * application are served over HTTPS on hosts of one approved site: then the cookie is first-party
+ * (SameSite=Strict holds) and the exact-origin checks are meaningful. The site is set explicitly
+ * by the owner (IMPERSONATION_SITE) instead of guessed, because registrable domains depend on the
+ * public suffix list (e.g. example.co.uk). Any problem disables impersonation (fail closed); the
+ * rest of the API is unaffected. Development and test are not checked (localhost over HTTP).
+ */
+export function impersonationDeployment(env: {
+  NODE_ENV: string;
+  COOKIE_SECURE: boolean;
+  API_PUBLIC_URL?: string;
+  IMPERSONATION_SITE?: string;
+  ADMIN_WEB_URL: string;
+  MERCHANT_APP_URL: string;
+  DRIVER_APP_URL: string;
+}): { enabled: boolean; problems: string[] } {
+  if (env.NODE_ENV !== 'production') return { enabled: true, problems: [] };
+  const problems: string[] = [];
+  if (!env.COOKIE_SECURE) problems.push('COOKIE_SECURE must be true');
+  const site = env.IMPERSONATION_SITE;
+  if (!site) problems.push('IMPERSONATION_SITE is not set');
+  else if (!site.includes('.') || IPV4.test(site) || site.startsWith('.') || site.endsWith('.')) {
+    problems.push('IMPERSONATION_SITE must be a domain such as example.com');
+  }
+  const urls: [string, string | undefined][] = [
+    ['API_PUBLIC_URL', env.API_PUBLIC_URL],
+    ['ADMIN_WEB_URL', env.ADMIN_WEB_URL],
+    ['MERCHANT_APP_URL', env.MERCHANT_APP_URL],
+    ['DRIVER_APP_URL', env.DRIVER_APP_URL],
+  ];
+  for (const [name, value] of urls) {
+    if (!value) {
+      problems.push(`${name} is not set`);
+      continue;
+    }
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:') problems.push(`${name} must use https`);
+    if (host === 'localhost' || IPV4.test(host) || host.startsWith('[')) {
+      problems.push(`${name} must use a domain name`);
+    } else if (site && host !== site && !host.endsWith(`.${site}`)) {
+      problems.push(`${name} must be on ${site}`);
+    }
+  }
+  return { enabled: problems.length === 0, problems };
+}
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -108,6 +167,8 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       cookieSecure: env.COOKIE_SECURE,
     },
     rateLimitEnabled: env.RATE_LIMIT_ENABLED,
+    impersonationSweeperEnabled: env.IMPERSONATION_SWEEPER_ENABLED,
+    impersonation: impersonationDeployment(env),
     links: {
       adminWebUrl: env.ADMIN_WEB_URL,
       merchantAppUrl: env.MERCHANT_APP_URL,

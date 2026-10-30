@@ -1053,5 +1053,21 @@ export const ar: TranslationResource = {
       subject: 'حسابك في كوبرا',
       body: 'تم إنشاء حساب لك. عيّن كلمة المرور بفتح هذا الرابط (صالح لمدة {{hours}} ساعة):',
     },
+    impersonationSummary: {
+      subject: 'دخل أحد مسؤولي كوبرا إلى حسابك',
+      intro: 'دخل أحد مسؤولي كوبرا، {{name}}، إلى حسابك لمساعدتك من {{start}} إلى {{end}}.',
+      endedBecause: 'انتهى الوصول: {{reason}}.',
+      endReasons: {
+        MANUAL: 'تم إنهاؤه يدوياً',
+        EXPIRED: 'انتهت مدة الثلاثين دقيقة',
+        ACTOR_LOGOUT: 'سجّل المسؤول خروجه',
+        ACTOR_SESSION_ENDED: 'انتهت جلسة المسؤول',
+        ACTOR_REVOKED: 'تغيّرت صلاحيات المسؤول',
+        TARGET_REVOKED: 'تغيّرت صلاحيات حسابك',
+      },
+      actionsTitle: 'الإجراءات التي تمت في حسابك:',
+      noActions: 'لم يتم إجراء أي تغيير على حسابك.',
+      contact: 'إذا لم تكن تتوقع ذلك، تواصل مع دعم كوبرا.',
+    },
   },
 };

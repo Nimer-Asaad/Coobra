@@ -182,6 +182,6 @@ describe('impersonation route classification', () => {
       total: routes.length,
       staffOnly: count((route) => policy[route.key]?.basis === 'STAFF_ONLY'),
       reachable: count((route) => policy[route.key]?.basis !== 'STAFF_ONLY'),
-    }).toEqual({ total: 104, staffOnly: 72, reachable: 32 });
+    }).toEqual({ total: 111, staffOnly: 77, reachable: 34 });
   });
 });
