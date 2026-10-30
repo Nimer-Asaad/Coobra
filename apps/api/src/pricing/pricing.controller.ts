@@ -256,7 +256,7 @@ export class MerchantPricingController {
     @Auth() auth: RequestAuth,
     @Body(new ZodValidationPipe(quoteRequestSchema)) body: QuoteRequestInput,
   ): Promise<PricingQuote> {
-    return this.pricing.quoteForMerchant(auth.user, body);
+    return this.pricing.quoteForMerchant(auth.acting, body);
   }
 
   @Get('pickup-zone')

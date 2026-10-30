@@ -25,6 +25,7 @@ import {
 import { AuditService } from '../audit/audit.service.js';
 import { isUniqueViolation } from '../auth/auth.service.js';
 import { AppException, Errors } from '../common/app-exception.js';
+import type { ActingContext } from '../common/acting-context.js';
 import type { RequestMeta } from '../common/request.js';
 import { CodService } from '../finance/cod.service.js';
 import { ReturnsService } from '../finance/returns.service.js';
@@ -88,11 +89,15 @@ export class ShipmentsService {
     throw Errors.forbidden();
   }
 
-  async list(actor: Actor, query: ListShipmentsQuery): Promise<Paginated<ShipmentListItem>> {
-    const filters: Prisma.ShipmentWhereInput[] = [this.scopeFor(actor)];
+  async list(
+    acting: ActingContext,
+    query: ListShipmentsQuery,
+  ): Promise<Paginated<ShipmentListItem>> {
+    const principal = acting.principal;
+    const filters: Prisma.ShipmentWhereInput[] = [this.scopeFor(principal)];
     if (query.status) filters.push({ status: query.status });
     if (query.governorate) filters.push({ governorate: query.governorate });
-    if (actor.role !== 'MERCHANT' && actor.role !== 'DRIVER') {
+    if (principal.role !== 'MERCHANT' && principal.role !== 'DRIVER') {
       if (query.merchantId) filters.push({ merchantId: query.merchantId });
       if (query.driverId) filters.push({ driverId: query.driverId });
     }
@@ -154,9 +159,9 @@ export class ShipmentsService {
     return { counts, total };
   }
 
-  async get(actor: Actor, id: string): Promise<ShipmentDetails> {
+  async get(acting: ActingContext, id: string): Promise<ShipmentDetails> {
     const db = this.prisma.client;
-    return this.toDetails(db, await this.findScoped(db, actor, id));
+    return this.toDetails(db, await this.findScoped(db, acting.principal, id));
   }
 
   private async findScoped(db: Tx, actor: Actor, id: string) {
@@ -170,10 +175,11 @@ export class ShipmentsService {
   }
 
   /** A merchant creates a shipment for their own account, priced by the server. */
-  createForMerchant(merchant: Actor, input: CreateShipmentInput, meta: RequestMeta) {
-    return this.create(merchant, merchant.id, input, meta, async (tx, originZoneId) => {
+  createForMerchant(acting: ActingContext, input: CreateShipmentInput, meta: RequestMeta) {
+    const merchantId = acting.principal.id;
+    return this.create(acting, merchantId, input, meta, async (tx, originZoneId) => {
       const route = {
-        merchantId: merchant.id,
+        merchantId,
         originZoneId,
         destinationZoneId: input.destinationZoneId,
       };
@@ -188,14 +194,18 @@ export class ShipmentsService {
    * Staff create a shipment on behalf of an existing, active merchant (recorded as staff).
    * The fee is priced automatically; a manual fee is recorded as an override with its reason.
    */
-  async createForMerchantByStaff(staff: Actor, input: AdminCreateShipmentInput, meta: RequestMeta) {
+  async createForMerchantByStaff(
+    acting: ActingContext,
+    input: AdminCreateShipmentInput,
+    meta: RequestMeta,
+  ) {
     const merchant = await this.prisma.client.user.findFirst({
       where: { id: input.merchantId, role: 'MERCHANT', status: 'ACTIVE' },
       select: { id: true },
     });
     if (!merchant) throw Errors.shipmentMerchantInvalid();
     const { merchantId, manualFee, manualFeeReason, ...fields } = input;
-    return this.create(staff, merchantId, fields, meta, async (tx, originZoneId) => {
+    return this.create(acting, merchantId, fields, meta, async (tx, originZoneId) => {
       const route = { merchantId, originZoneId, destinationZoneId: input.destinationZoneId };
       let priced: PriceResult | null = null;
       try {
@@ -220,8 +230,9 @@ export class ShipmentsService {
     });
   }
 
+  /** `acting.actor` is recorded as the creator; the result is read back as the principal sees it. */
   private async create(
-    creator: Actor,
+    acting: ActingContext,
     merchantId: string,
     // originZoneId comes only from staff; merchant input never carries it (schema strips it).
     input: Omit<CreateShipmentInput, 'quoteId'> & { quoteId?: string; originZoneId?: string },
@@ -235,6 +246,7 @@ export class ShipmentsService {
       manual: { reason: string } | null;
     }>,
   ): Promise<ShipmentDetails> {
+    const creator = acting.actor;
     for (let attempt = 1; ; attempt++) {
       try {
         const shipment = await this.prisma.client.$transaction(async (tx) => {
@@ -316,7 +328,7 @@ export class ShipmentsService {
               actorRole: creator.role,
             },
           });
-          return this.toDetails(tx, await this.findScoped(tx, creator, created.id));
+          return this.toDetails(tx, await this.findScoped(tx, acting.principal, created.id));
         });
         await this.audit.record({
           action: 'SHIPMENT_CREATED',
@@ -471,16 +483,17 @@ export class ShipmentsService {
    * appends history and records COD in one transaction guarded by the version column.
    */
   async transition(
-    actor: Actor,
+    acting: ActingContext,
     id: string,
     input: TransitionShipmentInput,
     meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    const role = shipmentActorForRole(actor.role);
+    const { actor, principal } = acting;
+    const role = shipmentActorForRole(principal.role);
     if (!role) throw Errors.forbidden();
 
     const { shipment, fromStatus } = await this.prisma.client.$transaction(async (tx) => {
-      const current = await this.findScoped(tx, actor, id);
+      const current = await this.findScoped(tx, principal, id);
       const rule = findShipmentTransition(current.status, input.toStatus);
       if (!rule) throw Errors.shipmentInvalidTransition();
       if (!rule.actors.includes(role)) throw Errors.forbidden();
@@ -531,7 +544,7 @@ export class ShipmentsService {
       });
       if (rule.requiresCodConfirmation && input.cod) {
         // Validates the confirmation, records the collection and posts COD and the fee.
-        await this.cod.onDelivered(tx, current, actor, input.cod, now);
+        await this.cod.onDelivered(tx, current, acting, input.cod, now);
       }
       if (input.toStatus === 'RETURN_REQUESTED') {
         await this.returns.onRequested(tx, current, actor, input.reason ?? null);
@@ -540,7 +553,7 @@ export class ShipmentsService {
         // Posts the return fee if decided; never refunds or reverses anything automatically.
         await this.returns.onReturned(tx, current, actor, now);
       }
-      return { shipment: await this.findScoped(tx, actor, id), fromStatus: current.status };
+      return { shipment: await this.findScoped(tx, principal, id), fromStatus: current.status };
     });
 
     await this.audit.record({

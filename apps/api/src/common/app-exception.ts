@@ -154,6 +154,12 @@ export const Errors = {
       'USER_CHANGED',
       'This user was changed by someone else; reload and try again',
     ),
+  impersonationForbiddenAction: () =>
+    new AppException(
+      HttpStatus.FORBIDDEN,
+      'IMPERSONATION_FORBIDDEN_ACTION',
+      'This action is not available while acting as another account',
+    ),
   selfApprovalForbidden: () =>
     new AppException(
       HttpStatus.FORBIDDEN,

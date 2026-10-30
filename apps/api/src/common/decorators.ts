@@ -23,6 +23,13 @@ export const Auth = createParamDecorator((_data: unknown, ctx: ExecutionContext)
   return request.auth;
 });
 
+/** Injects the real actor, the effective principal and the impersonation of the request. */
+export const Acting = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
+  const request = ctx.switchToHttp().getRequest<AppRequest>();
+  if (!request.auth) throw Errors.unauthenticated();
+  return request.auth.acting;
+});
+
 /** Injects the client IP address and user agent. */
 export const Meta = createParamDecorator((_data: unknown, ctx: ExecutionContext) =>
   requestMeta(ctx.switchToHttp().getRequest<AppRequest>()),

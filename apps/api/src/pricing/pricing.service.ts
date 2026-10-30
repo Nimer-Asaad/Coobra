@@ -13,6 +13,7 @@ import {
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
 import { Errors } from '../common/app-exception.js';
+import type { ActingContext } from '../common/acting-context.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { zoneLabel, ZonesService, type ZonePath } from './zones.service.js';
@@ -165,9 +166,11 @@ export class PricingService {
 
   /** Merchant quote: persisted, single-use and valid for QUOTE_TTL_MINUTES. */
   async quoteForMerchant(
-    merchant: Actor,
+    acting: ActingContext,
     input: { destinationZoneId: string },
   ): Promise<PricingQuote> {
+    // The quote is the principal's; the real actor is recorded as having requested it.
+    const merchant = acting.principal;
     const db = this.prisma.client;
     // Always the approved pickup zone: a merchant cannot choose the origin of their price.
     const originZoneId = await this.resolveOrigin(db, merchant.id, undefined);
@@ -186,7 +189,7 @@ export class PricingService {
         source: result.source,
         deliveryFee: result.fee,
         returnFee: result.returnFee,
-        createdById: merchant.id,
+        createdById: acting.actor.id,
         expiresAt: new Date(Date.now() + QUOTE_TTL_MINUTES * 60_000),
       },
     });

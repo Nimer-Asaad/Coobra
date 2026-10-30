@@ -46,7 +46,7 @@ export class AdminShipmentsController {
     @Auth() auth: RequestAuth,
     @Query(listQuery) query: ListShipmentsQuery,
   ): Promise<Paginated<ShipmentListItem>> {
-    return this.shipments.list(auth.user, query);
+    return this.shipments.list(auth.acting, query);
   }
 
   @Get('shipments/summary')
@@ -56,7 +56,7 @@ export class AdminShipmentsController {
 
   @Get('shipments/:id')
   get(@Auth() auth: RequestAuth, @Param('id') id: string): Promise<ShipmentDetails> {
-    return this.shipments.get(auth.user, id);
+    return this.shipments.get(auth.acting, id);
   }
 
   @Roles(...SHIPMENT_MANAGER_ROLES)
@@ -67,7 +67,7 @@ export class AdminShipmentsController {
     @Body(new ZodValidationPipe(adminCreateShipmentSchema)) body: AdminCreateShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.createForMerchantByStaff(auth.user, body, meta);
+    return this.shipments.createForMerchantByStaff(auth.acting, body, meta);
   }
 
   @Roles(...SHIPMENT_MANAGER_ROLES)
@@ -103,7 +103,7 @@ export class AdminShipmentsController {
     @Body(transitionBody) body: TransitionShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.transition(auth.user, id, body, meta);
+    return this.shipments.transition(auth.acting, id, body, meta);
   }
 
   @Get('merchants')
@@ -132,12 +132,12 @@ export class MerchantShipmentsController {
     @Auth() auth: RequestAuth,
     @Query(listQuery) query: ListShipmentsQuery,
   ): Promise<Paginated<ShipmentListItem>> {
-    return this.shipments.list(auth.user, query);
+    return this.shipments.list(auth.acting, query);
   }
 
   @Get(':id')
   get(@Auth() auth: RequestAuth, @Param('id') id: string): Promise<ShipmentDetails> {
-    return this.shipments.get(auth.user, id);
+    return this.shipments.get(auth.acting, id);
   }
 
   @Throttle(CREATE_LIMIT)
@@ -147,7 +147,7 @@ export class MerchantShipmentsController {
     @Body(new ZodValidationPipe(createShipmentSchema)) body: CreateShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.createForMerchant(auth.user, body, meta);
+    return this.shipments.createForMerchant(auth.acting, body, meta);
   }
 
   @HttpCode(200)
@@ -158,7 +158,7 @@ export class MerchantShipmentsController {
     @Body(transitionBody) body: TransitionShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.transition(auth.user, id, body, meta);
+    return this.shipments.transition(auth.acting, id, body, meta);
   }
 }
 
@@ -173,12 +173,12 @@ export class DriverShipmentsController {
     @Auth() auth: RequestAuth,
     @Query(listQuery) query: ListShipmentsQuery,
   ): Promise<Paginated<ShipmentListItem>> {
-    return this.shipments.list(auth.user, query);
+    return this.shipments.list(auth.acting, query);
   }
 
   @Get(':id')
   get(@Auth() auth: RequestAuth, @Param('id') id: string): Promise<ShipmentDetails> {
-    return this.shipments.get(auth.user, id);
+    return this.shipments.get(auth.acting, id);
   }
 
   @HttpCode(200)
@@ -189,6 +189,6 @@ export class DriverShipmentsController {
     @Body(transitionBody) body: TransitionShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.transition(auth.user, id, body, meta);
+    return this.shipments.transition(auth.acting, id, body, meta);
   }
 }

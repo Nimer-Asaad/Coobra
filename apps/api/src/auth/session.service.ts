@@ -60,6 +60,9 @@ export class SessionService {
     const now = Date.now();
     const { user, ...session } = found;
     if (session.revokedAt || session.expiresAt.getTime() <= now) return null;
+    // Impersonation is not enabled (Phase 4C.3 adds its validation): such a session never
+    // authenticates, so no request can act as another account.
+    if (session.impersonationId !== null) return null;
     if (user.status !== 'ACTIVE') return null;
     // A role change must not keep a session open in an app the user no longer belongs to.
     if (!isRoleAllowedForApp(user.role, session.clientApp)) return null;

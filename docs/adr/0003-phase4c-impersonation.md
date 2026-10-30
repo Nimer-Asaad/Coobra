@@ -733,15 +733,15 @@ the URL` runs close to Vitest's 5-second limit under a fully parallel run and al
 
 ## 16. Phases
 
-| Phase | Delivers                                                                                  | Checkpoint                                         |
-| ----- | ----------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 4C.0  | This ADR and the revised `docs/impersonation.md`                                          | Done; owner approved on 2026-10-30                 |
-| 4C.1  | Migration 14, shared contracts, route classification, route-coverage and schema tests     | **Done; awaiting owner review** (§17)              |
-| 4C.2  | `ActingContext` and request context everywhere; impersonation not yet possible            | Full existing suite passes unchanged               |
-| 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | Security, concurrency, session and outbox tests    |
-| 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | Conflict-of-interest and financial-invariant tests |
-| 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | UI tests in Arabic and English                     |
-| 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | Owner reviews the PR                               |
+| Phase | Delivers                                                                                  | Checkpoint                                                                   |
+| ----- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 4C.0  | This ADR and the revised `docs/impersonation.md`                                          | Done; owner approved on 2026-10-30                                           |
+| 4C.1  | Migration 14, shared contracts, route classification, route-coverage and schema tests     | Done; approved at `1b7c0ab`; applied to the local development database (§17) |
+| 4C.2  | `ActingContext` and request context everywhere; impersonation not yet possible            | **Done; awaiting owner review** (§18)                                        |
+| 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | Security, concurrency, session and outbox tests                              |
+| 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | Conflict-of-interest and financial-invariant tests                           |
+| 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | UI tests in Arabic and English                                               |
+| 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | Owner reviews the PR                                                         |
 
 ## 17. Phase 4C.1 validation record (2026-10-30)
 
@@ -762,3 +762,39 @@ migrations).
 | Full suites (before the provenance change) | Integration 149/149 (14 files); unit tests in all packages; typecheck 12/12; lint clean                                                                                                                                                                                  |
 | Route coverage                             | `route-classification.spec.ts`: 104 routes, all classified, none stale; 72 staff-only, 32 reachable by a merchant or driver                                                                                                                                              |
 | Independent review                         | 4 reviewers and 4 adversarial verifiers; 20 findings (12 confirmed, 7 plausible, 1 refuted), all confirmed and plausible ones fixed or decided by the owner. Separately, the schema tests caught that a CHECK passes on NULL; fixed with `IS NOT DISTINCT FROM`          |
+
+## 18. Phase 4C.2 record (2026-10-30)
+
+**Delivered.** `apps/api/src/common/acting-context.ts` defines `ActingContext` (`actor`,
+`principal`, `impersonation`). The global `AuthGuard` sets `request.auth.acting` on every
+authenticated request, and a global interceptor runs the handler inside an `AsyncLocalStorage`,
+so lower layers can read it. Impersonation stays disabled: `SessionService.authenticate` refuses
+any session that belongs to an impersonation, so `impersonation` is always null and the actor
+always equals the principal.
+
+**Refactored (the paths an impersonation will reach).** Merchant and driver shipments (list,
+get, create, transitions) and the merchant price quote take the acting context: role rules and
+data scoping use the principal; `createdById`, `creatorRole`, `pricedById`, history actors,
+`deliveredById`, the quote's `createdById` and posting authors use the actor. COD separates the
+accountable driver (the principal, whose custody account receives the cash) from the person
+recorded as acting (the actor). The staff shipment routes pass the same context and behave as
+before.
+
+**Enforced below the services.** `LedgerService.post` refuses (`IMPERSONATION_FORBIDDEN_ACTION`)
+whenever the current request is impersonating, before touching the database. `AuditService` adds
+the effective account and the impersonation to entries written during an impersonation, and
+writes ordinary entries exactly as before (the new fields are omitted, not set to NULL).
+
+**Unchanged by design.** Staff-only routes and the merchant/driver routes classified `FORBIDDEN`
+(payouts, shortfall responses, settlements, collections, pickup-zone changes) keep `auth.user`:
+they are never reachable during an impersonation, and outside one `auth.user` is both the actor
+and the principal. Every maker-checker check (`ApprovalService`, payouts, settlements) compares
+the stored real person with the real actor, as before. Merchant and driver finance reads scope by
+the session's account, which is the principal.
+
+**Validation.** Development database: backed up (verified by a full restore), migration 14
+applied with identical data checksums, no drift, API healthy. Regression on the isolated
+database: typecheck 12/12; unit tests 208/208 (47 in the API, including 9 for the acting
+context, the ledger stop, audit stamping and the session refusal); integration 160/160 (including
+`acting-context.integration-spec.ts`: unchanged attribution for merchant, staff and driver
+writes, COD postings and quotes, scoping, and refusal of an impersonation session).

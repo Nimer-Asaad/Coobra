@@ -4,6 +4,7 @@ import { SESSION_COOKIE_NAME, type UserRole } from '@coobra/shared';
 import { Errors } from '../common/app-exception.js';
 import { ALLOW_UNVERIFIED_EMAIL_KEY, IS_PUBLIC_KEY, ROLES_KEY } from '../common/decorators.js';
 import { readCookie, type AppRequest } from '../common/request.js';
+import { selfActing } from '../common/acting-context.js';
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
 import { SessionService } from './session.service.js';
 
@@ -39,7 +40,8 @@ export class AuthGuard implements CanActivate {
       if (!origin || !this.config.corsOrigins.includes(origin)) throw Errors.csrfOriginRejected();
     }
 
-    request.auth = { ...auth, transport: credential.transport };
+    // Impersonation sessions are refused by SessionService, so everyone acts as themselves.
+    request.auth = { ...auth, transport: credential.transport, acting: selfActing(auth.user) };
 
     const allowUnverified = this.reflector.getAllAndOverride<boolean>(
       ALLOW_UNVERIFIED_EMAIL_KEY,
