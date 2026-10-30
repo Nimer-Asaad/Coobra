@@ -8,6 +8,10 @@ import { bff, ClientApiError } from '@/lib/api-client';
 import { renderWithProviders } from '@/test/render';
 import { AuditLogPanel } from './audit-log-panel';
 
+// The filters render one <option> per audit action, so a role query scans a large tree. Under a
+// parallel test run the first lookup already took 1.4–1.6 s on main (the default wait is 1 s).
+const FIRST_RENDER = { timeout: 5_000 };
+
 const replace = vi.fn();
 let search = new URLSearchParams();
 vi.mock('next/navigation', () => ({
@@ -86,7 +90,13 @@ describe('AuditLogPanel', () => {
   it('lists entries with actor, target, record and summary', async () => {
     serve(page([entry()], 1));
     renderWithProviders(<AuditLogPanel />);
-    expect(await screen.findByRole('button', { name: /Details of Shipment status changed/ }));
+    expect(
+      await screen.findByRole(
+        'button',
+        { name: /Details of Shipment status changed/ },
+        FIRST_RENDER,
+      ),
+    );
     expect(screen.getByText('Sami Ops')).toBeTruthy();
     expect(screen.getByText('Jenin Sweets')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Shipment' })).toBeTruthy();
@@ -140,7 +150,7 @@ describe('AuditLogPanel', () => {
     const user = userEvent.setup();
     serve(page([entry()]));
     const view = renderWithProviders(<AuditLogPanel />);
-    await user.click(await screen.findByRole('button', { name: 'Sami Ops' }));
+    await user.click(await screen.findByRole('button', { name: 'Sami Ops' }, FIRST_RENDER));
     expect(replace).toHaveBeenLastCalledWith('/audit?actorId=ops-1');
     await user.click(screen.getByRole('button', { name: 'Shipment' }));
     expect(replace).toHaveBeenLastCalledWith(`/audit?entityType=SHIPMENT&entityId=${SHIPMENT}`);
@@ -193,7 +203,11 @@ describe('AuditLogPanel', () => {
     const user = userEvent.setup();
     serve(page([entry({ id: details.id, action: 'USER_PROFILE_UPDATED', category: 'USERS' })]));
     renderWithProviders(<AuditLogPanel />);
-    const opener = await screen.findByRole('button', { name: /Details of Profile edited/ });
+    const opener = await screen.findByRole(
+      'button',
+      { name: /Details of Profile edited/ },
+      FIRST_RENDER,
+    );
     await user.click(opener);
     const dialog = await screen.findByRole('dialog', { name: 'Profile edited' });
     await within(dialog).findByText('Changes');
@@ -214,8 +228,10 @@ describe('AuditLogPanel', () => {
   it('renders in Arabic', async () => {
     serve(page([entry()]));
     renderWithProviders(<AuditLogPanel />, 'ar');
-    expect(await screen.findByRole('heading', { name: 'سجل التدقيق' })).toBeTruthy();
-    expect(await screen.findByRole('button', { name: /تفاصيل تغيير حالة الشحنة/ })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'سجل التدقيق' }, FIRST_RENDER)).toBeTruthy();
+    expect(
+      await screen.findByRole('button', { name: /تفاصيل تغيير حالة الشحنة/ }, FIRST_RENDER),
+    ).toBeTruthy();
     expect(within(screen.getByRole('table')).getByText('الشحنات')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'تطبيق' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'شحنة' })).toBeTruthy();

@@ -8,3 +8,4 @@ export * from './pricing.js';
 export * from './finance.js';
 export * from './users.js';
 export * from './audit.js';
+export * from './impersonation.js';

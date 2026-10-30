@@ -587,6 +587,7 @@ export const en = {
       PRICING: 'Pricing & zones',
       FINANCE: 'Finance',
       RETURNS: 'Returns',
+      IMPERSONATION: 'Impersonation',
     },
     entities: {
       USER: 'User',
@@ -606,6 +607,7 @@ export const en = {
       ZONE: 'Zone',
       ZONE_KIND: 'Zone type',
       SESSION: 'Session',
+      IMPERSONATION: 'Impersonation',
     },
     actions: {
       AUTH_REGISTERED: 'Merchant registered',
@@ -668,6 +670,10 @@ export const en = {
       RETURN_FEE_SET: 'Return fee set',
       RETURN_FEE_WAIVED: 'Return fee waived',
       RETURN_CLOSED: 'Return closed',
+      AUTH_REAUTHENTICATED: 'Password re-entered',
+      AUTH_REAUTHENTICATION_FAILED: 'Failed password re-entry',
+      IMPERSONATION_STARTED: 'Impersonation started',
+      IMPERSONATION_ENDED: 'Impersonation ended',
     },
     fields: {
       fullName: 'Full name',
@@ -1037,6 +1043,16 @@ export const en = {
     INVALID_STATE: 'This action is not possible in the current state. Reload and check.',
     INSUFFICIENT_FUNDS: 'There are not enough confirmed funds for this.',
     DUPLICATE_POSTING: 'This was already recorded.',
+    IMPERSONATION_FORBIDDEN_ACTION:
+      'This action is not available while acting as another account. Use the admin console instead.',
+    IMPERSONATION_NOT_ALLOWED: 'This account cannot be accessed this way.',
+    IMPERSONATION_ACTIVE: 'An impersonation is already active for you or for this account.',
+    IMPERSONATION_CONFLICT:
+      'You acted on this as the account holder, so another staff member must make this decision.',
+    IMPERSONATION_CODE_INVALID: 'This link has expired. Start again from the admin console.',
+    REAUTH_REQUIRED: 'Enter your password again to continue.',
+    CONSEQUENCE_CONFIRMATION_REQUIRED: 'Review and confirm the charges before continuing.',
+    CONSEQUENCE_CHANGED: 'The charges have changed. Review them again before continuing.',
     SERVICE_UNAVAILABLE: 'COOBRA is temporarily unavailable. Try again in a moment.',
     NETWORK: 'Cannot reach the server. Check your connection and try again.',
   },

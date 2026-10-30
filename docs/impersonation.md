@@ -1,89 +1,76 @@
-# SUPER_ADMIN impersonation — design (NOT implemented in Phase 1)
+# SUPER_ADMIN impersonation (Phase 4C — foundation in place, not enabled yet)
 
-Goal: let a SUPER_ADMIN see and operate the platform exactly as another user does
-(e.g. to reproduce a merchant's problem) without knowing their password, while keeping a
-complete, tamper-evident record of who really did what.
+The decisions, threat model, schema and rationale are in
+[ADR 0003](adr/0003-phase4c-impersonation.md). This page is the short reference.
 
-## Principles
+## What it is
 
-1. **Two identities per request.** Every impersonated request carries the _effective user_
-   (whose permissions apply) and the _actor_ (the SUPER_ADMIN). Authorization uses the
-   effective user; auditing always records the actor.
-2. **Explicit, temporary, visible.** Impersonation is started deliberately, expires quickly,
-   and every UI shows a persistent banner while it is active.
-3. **Least privilege.** An impersonation session can never do more than the target user, and
-   some sensitive operations are blocked entirely.
+A SUPER_ADMIN can temporarily operate a **MERCHANT or DRIVER** account to give support, and the
+app behaves like that account. It gives **full operational access, but no financial authority**:
+an impersonated request never posts to the ledger, declares or counts cash, gives financial
+consent or changes pricing configuration.
 
-## Data model (future migration)
+## Rules
 
-```prisma
-model ImpersonationSession {
-  id              String    @id @default(uuid(7)) @db.Uuid
-  actorUserId     String    @db.Uuid      // the SUPER_ADMIN
-  targetUserId    String    @db.Uuid      // the user being impersonated
-  reason          String                  // mandatory free-text justification
-  ticketReference String?
-  sessionId       String    @unique @db.Uuid  // the temporary Session row it created
-  startedAt       DateTime  @default(now())
-  expiresAt       DateTime                // e.g. startedAt + 30 minutes, not extendable
-  endedAt         DateTime?
-  endedReason     String?                 // MANUAL | EXPIRED | ACTOR_LOGOUT | REVOKED
-}
-```
+- SUPER_ADMIN only, started from a normal admin session (no nesting), after re-entering the
+  password within the last 5 minutes. A reason is required; a ticket reference is optional.
+- Refused for yourself, for any staff account (including another SUPER_ADMIN) and for an account
+  that is not active.
+- 30 minutes from the start, never extended. At most one active impersonation per admin and per
+  account, enforced by the database.
+- Ends on the banner's End button, from the admin console, on expiry, when the admin logs out or
+  their admin session ends, when the admin is deactivated or changes role, or when the account is
+  deactivated. The account holder is emailed a short summary of what was done.
 
-`Session` gains `impersonationId String? @unique`. `AuditLog` gains
-`effectiveUserId String?` and `impersonationId String?` (`actorUserId` already exists and
-always holds the real human).
+## Identities
 
-## Flow
+Every request during impersonation carries four separate identities:
 
-1. `POST /v1/admin/impersonations { targetUserId, reason, ticketReference? }`
-   - Requires SUPER_ADMIN, a verified email, and **step-up re-authentication**
-     (password re-entry, later TOTP) within the last 5 minutes.
-   - Refused if the target is a SUPER_ADMIN, is disabled, or is the actor.
-   - Creates a **new, separate session** (never reuses the target's sessions), bound to the
-     target's `clientApp`, with a short absolute expiry (default 30 minutes) and no renewal.
-   - Writes `IMPERSONATION_STARTED` to the audit log (actor, target, reason, IP, user agent).
-2. The admin console opens the target experience (merchant/driver web app or admin view)
-   with the temporary session. The actor's own session stays untouched.
-3. Every request in that session resolves `request.auth` as
-   `{ user: target, actor: superAdmin, impersonationId }`.
-4. `POST /v1/admin/impersonations/:id/end` (or expiry, or the actor logging out) revokes the
-   temporary session and writes `IMPERSONATION_ENDED`.
+| Identity              | Meaning                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| Real actor            | The SUPER_ADMIN. Recorded in every "done by" column and audit entry.  |
+| Effective account     | The merchant or driver. Decides permissions and what data is visible. |
+| Impersonation session | Recorded on every audit entry and history row written meanwhile.      |
+| Accountable party     | The ledger account owner, always taken from the record itself.        |
 
-## Restrictions while impersonating
+The real actor and the effective account are never confused: maker-checker checks always compare
+real humans (ADR 0003 §11).
 
-Blocked with `403 IMPERSONATION_FORBIDDEN_ACTION` (enforced by a guard decorator such as
-`@DenyDuringImpersonation()` on the route, not by the UI):
+## What can be done while impersonating
 
-- Changing password, email, phone, or any credential; password-reset/verification flows.
-- Creating/revoking the target's other sessions; logging the target out elsewhere.
-- Financial operations once they exist: payouts, withdrawals, bank details, refunds,
-  settlement approval, invoice finalisation.
-- Accepting legal terms, deleting the account, exporting personal data.
-- Starting another impersonation (no nesting) or any admin endpoint.
+| Area                 | Allowed                                                                                                                                      | Forbidden                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Merchant shipments   | View; create (fee shown and confirmed); cancel; request a return (fee shown and confirmed)                                                   | —                                                                              |
+| Driver shipments     | View; picked up, out for delivery, failed delivery, re-attempt, return in transit, returned to hub (reason required; fee consequences shown) | Delivered (COD), returned to the merchant, COD collection                      |
+| Merchant finance     | View balances, payouts and shortfalls; price quotes                                                                                          | Request or cancel a payout; accept or decline a shortfall; pickup-zone changes |
+| Driver finance       | View custody and settlements                                                                                                                 | Submit a settlement                                                            |
+| Account and security | View the profile                                                                                                                             | Password, email, verification, preferences, sessions                           |
+| Admin console        | —                                                                                                                                            | Every staff route                                                              |
 
-Read access and normal operational actions (e.g. viewing shipments, creating a draft shipment
-on the merchant's behalf) are allowed but always audited with both identities.
+Anything not explicitly classified is forbidden (`403 IMPERSONATION_FORBIDDEN_ACTION`).
 
-## Auditing
+A SUPER_ADMIN who acted on a shipment while impersonating cannot later approve, close, price or
+correct that shipment as staff (`403 IMPERSONATION_CONFLICT`); another staff member must
+(ADR 0003 §10, rule R1).
 
-- Every audit entry written during impersonation stores `actorUserId` (SUPER_ADMIN),
-  `effectiveUserId` (target) and `impersonationId`.
-- Domain records that keep "created by"/"updated by" columns store the **actor**, plus the
-  impersonation id, never only the target.
-- Audit logs are append-only (no update/delete API; in production, a DB role without
-  `UPDATE/DELETE` on `audit_logs`).
-- The target user can be notified (email/in-app) that support accessed their account.
+## How the hand-off works
+
+The admin console opens the merchant or driver web app in a new tab. The two tabs exchange a
+short-lived, single-use code by `postMessage`, with both origins checked. The app redeems the code
+together with a secret only it holds, and the API sets a separate httpOnly impersonation cookie.
+No token or code ever appears in a URL. Native apps will use the same exchange later through a
+deep link (ADR 0003 §8).
 
 ## UI
 
-- Persistent, high-contrast banner in both languages: "You are acting as {name} — End".
-- Distinct browser tab title / app header colour.
-- Countdown to expiry; ending returns the SUPER_ADMIN to the admin console.
+- A persistent, high-contrast banner in Arabic and English: "You are acting as {name}", a
+  countdown to expiry and an End button.
+- A confirmation dialog, with any fee consequence, before each permitted change.
+- Forbidden actions are hidden or disabled, with a pointer to the admin route that covers them.
 
-## Why it is not implemented yet
+## Status
 
-Phase 1 delivers the prerequisites — server-side revocable sessions, a `clientApp`-bound
-session model, a global guard with decorators, and an audit log with an explicit actor —
-so impersonation can be added without changing the authentication design.
+Phase 4C.0 (design) is approved. Phase 4C.1 adds the database schema (migration
+`20261030120000_impersonation_foundation`), the shared contracts and the classification of every
+API route, with tests; it is awaiting owner review. Impersonation cannot be started yet: there
+is no route, guard or UI for it. The remaining phases are listed in ADR 0003 §16.

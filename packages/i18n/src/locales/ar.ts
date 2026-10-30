@@ -577,6 +577,7 @@ export const ar: TranslationResource = {
       PRICING: 'التسعير والمناطق',
       FINANCE: 'المالية',
       RETURNS: 'المرتجعات',
+      IMPERSONATION: 'الدخول بالنيابة',
     },
     entities: {
       USER: 'مستخدم',
@@ -596,6 +597,7 @@ export const ar: TranslationResource = {
       ZONE: 'منطقة',
       ZONE_KIND: 'نوع منطقة',
       SESSION: 'جلسة',
+      IMPERSONATION: 'دخول بالنيابة',
     },
     actions: {
       AUTH_REGISTERED: 'تسجيل تاجر',
@@ -658,6 +660,10 @@ export const ar: TranslationResource = {
       RETURN_FEE_SET: 'تحديد رسوم المرتجع',
       RETURN_FEE_WAIVED: 'إعفاء من رسوم المرتجع',
       RETURN_CLOSED: 'إغلاق مرتجع',
+      AUTH_REAUTHENTICATED: 'إعادة إدخال كلمة المرور',
+      AUTH_REAUTHENTICATION_FAILED: 'فشل إعادة إدخال كلمة المرور',
+      IMPERSONATION_STARTED: 'بدء الدخول بالنيابة',
+      IMPERSONATION_ENDED: 'انتهاء الدخول بالنيابة',
     },
     fields: {
       fullName: 'الاسم الكامل',
@@ -1019,6 +1025,16 @@ export const ar: TranslationResource = {
     INVALID_STATE: 'هذا الإجراء غير ممكن في الحالة الحالية. أعد التحميل وتحقّق.',
     INSUFFICIENT_FUNDS: 'لا توجد أموال مؤكدة كافية لذلك.',
     DUPLICATE_POSTING: 'تم تسجيل هذا من قبل.',
+    IMPERSONATION_FORBIDDEN_ACTION:
+      'هذا الإجراء غير متاح أثناء العمل بحساب آخر. استخدم لوحة الإدارة بدلاً من ذلك.',
+    IMPERSONATION_NOT_ALLOWED: 'لا يمكن الوصول إلى هذا الحساب بهذه الطريقة.',
+    IMPERSONATION_ACTIVE: 'يوجد دخول بالنيابة نشط لك أو لهذا الحساب.',
+    IMPERSONATION_CONFLICT:
+      'لقد تصرّفت في هذا بصفة صاحب الحساب، لذا يجب أن يتخذ هذا القرار موظف آخر.',
+    IMPERSONATION_CODE_INVALID: 'انتهت صلاحية هذا الرابط. ابدأ من جديد من لوحة الإدارة.',
+    REAUTH_REQUIRED: 'أدخل كلمة المرور مرة أخرى للمتابعة.',
+    CONSEQUENCE_CONFIRMATION_REQUIRED: 'راجع الرسوم وأكّدها قبل المتابعة.',
+    CONSEQUENCE_CHANGED: 'تغيّرت الرسوم. راجعها مرة أخرى قبل المتابعة.',
     SERVICE_UNAVAILABLE: 'خدمة كوبرا غير متاحة مؤقتاً. حاول مرة أخرى بعد قليل.',
     NETWORK: 'تعذّر الاتصال بالخادم. تحقّق من اتصالك وحاول مرة أخرى.',
   },

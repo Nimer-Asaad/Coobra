@@ -4,6 +4,8 @@ import { AUTH_TRANSPORT_HEADER, IDEMPOTENCY_HEADER } from '@coobra/shared';
 import type { AppConfig } from './config/env.js';
 
 export const API_PREFIX = 'v1';
+/** Routes served without the prefix (load balancer and orchestrator probes). */
+export const API_PREFIX_EXCLUDE = ['health', 'health/ready'];
 
 /** HTTP-level setup shared by the real server and the integration tests. */
 export function configureApp(app: NestExpressApplication, config: AppConfig): void {
@@ -17,6 +19,6 @@ export function configureApp(app: NestExpressApplication, config: AppConfig): vo
     allowedHeaders: ['content-type', 'authorization', AUTH_TRANSPORT_HEADER, IDEMPOTENCY_HEADER],
     maxAge: 600,
   });
-  app.setGlobalPrefix(API_PREFIX, { exclude: ['health', 'health/ready'] });
+  app.setGlobalPrefix(API_PREFIX, { exclude: API_PREFIX_EXCLUDE });
   app.enableShutdownHooks();
 }

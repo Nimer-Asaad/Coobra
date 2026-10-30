@@ -81,7 +81,7 @@ const SEEDED_ZONES = GOVERNORATES.map((code) => `'${code}'`).join(', ');
 /** Wipes test data. Seeded root zones and zone kinds (from the migration) are kept. */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE pickup_zone_requests, return_records, treasury_transfers, merchant_payments, merchant_payouts, driver_repayments, cash_clearings, driver_cash_shortages, driver_settlements, idempotency_records, finance_setting_changes, financial_adjustments, cod_shortfalls, journal_lines, journal_entries, financial_accounts, shipment_fee_overrides, shipment_pricing, pricing_quotes, pricing_rules, cod_collections, shipment_status_history, shipments, audit_logs, auth_tokens, sessions, merchant_profiles, users CASCADE',
+    'TRUNCATE TABLE notification_outbox, impersonation_exchange_codes, impersonation_sessions, pickup_zone_requests, return_records, treasury_transfers, merchant_payments, merchant_payouts, driver_repayments, cash_clearings, driver_cash_shortages, driver_settlements, idempotency_records, finance_setting_changes, financial_adjustments, cod_shortfalls, journal_lines, journal_entries, financial_accounts, shipment_fee_overrides, shipment_pricing, pricing_quotes, pricing_rules, cod_collections, shipment_status_history, shipments, audit_logs, auth_tokens, sessions, merchant_profiles, users CASCADE',
   );
   for (;;) {
     const deleted = await prisma.$executeRawUnsafe(

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { ERROR_CODES, GOVERNORATES, SHIPMENT_STATUSES } from '@coobra/shared';
+import {
+  consequenceConfirmationSchema,
+  ERROR_CODES,
+  exchangeImpersonationSchema,
+  GOVERNORATES,
+  reauthenticateSchema,
+  SHIPMENT_STATUSES,
+  startImpersonationSchema,
+} from '@coobra/shared';
 import { ar, createI18n, en } from './index.js';
 
 function flatKeys(value: object, prefix = ''): string[] {
@@ -38,6 +46,42 @@ describe('locales', () => {
     expect(createI18n('en').t('errors.SHIPMENT_COD_MISMATCH')).toBe(
       'The collected amount does not match the cash on delivery.',
     );
+  });
+
+  it('translates every validation message of the impersonation request schemas', () => {
+    const keys = new Set(flatKeys(en));
+    const arKeys = new Set(flatKeys(ar));
+    const long = 'x'.repeat(5000);
+    const cases: [
+      { safeParse: (input: unknown) => { error?: { issues: { message: string }[] } } },
+      unknown,
+    ][] = [
+      [reauthenticateSchema, {}],
+      [reauthenticateSchema, { password: '' }],
+      [reauthenticateSchema, { password: long }],
+      [startImpersonationSchema, {}],
+      [
+        startImpersonationSchema,
+        { targetUserId: 'x', reason: 'x', ticketReference: long, codeChallenge: 'x' },
+      ],
+      [
+        startImpersonationSchema,
+        { targetUserId: 1, reason: 1, ticketReference: 1, codeChallenge: 1 },
+      ],
+      [exchangeImpersonationSchema, {}],
+      [exchangeImpersonationSchema, { code: 'x', codeVerifier: long }],
+      [consequenceConfirmationSchema, {}],
+      [consequenceConfirmationSchema, { confirmationToken: 'x' }],
+      [consequenceConfirmationSchema, { confirmationToken: long }],
+    ];
+    const messages = cases.flatMap(([schema, input]) =>
+      (schema.safeParse(input).error?.issues ?? []).map((issue) => issue.message),
+    );
+    expect(messages.length).toBeGreaterThan(cases.length);
+    for (const message of messages) {
+      expect(keys.has(message), message).toBe(true);
+      expect(arKeys.has(message), message).toBe(true);
+    }
   });
 
   it('translates synchronously with interpolation', () => {

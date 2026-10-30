@@ -71,6 +71,11 @@ export const AUDIT_ACTIONS = [
   'RETURN_FEE_SET',
   'RETURN_FEE_WAIVED',
   'RETURN_CLOSED',
+  // Phase 4C (ADR 0003); written once impersonation is enabled.
+  'AUTH_REAUTHENTICATED',
+  'AUTH_REAUTHENTICATION_FAILED',
+  'IMPERSONATION_STARTED',
+  'IMPERSONATION_ENDED',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -81,6 +86,7 @@ export const AUDIT_CATEGORIES = [
   'PRICING',
   'FINANCE',
   'RETURNS',
+  'IMPERSONATION',
 ] as const;
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 
@@ -89,6 +95,7 @@ const PRICING_PREFIXES = ['ZONE_', 'PRICING_', 'MERCHANT_PICKUP_', 'PICKUP_ZONE_
 /** Accepts any string: entries written before an action was renamed still get a category. */
 export function auditCategory(action: string): AuditCategory {
   if (action.startsWith('AUTH_')) return 'AUTH';
+  if (action.startsWith('IMPERSONATION_')) return 'IMPERSONATION';
   if (action.startsWith('USER_')) return 'USERS';
   if (action.startsWith('RETURN_')) return 'RETURNS';
   if (action === 'SHIPMENT_FEE_OVERRIDDEN') return 'FINANCE';
@@ -122,6 +129,8 @@ export const AUDIT_ENTITY_KEYS = {
   PICKUP_ZONE_REQUEST: 'requestId',
   ZONE: 'zoneId',
   ZONE_KIND: 'zoneKindId',
+  // Before SESSION: impersonation events also name the admin session.
+  IMPERSONATION: 'impersonationId',
   SESSION: 'sessionId',
 } as const;
 export const AUDIT_ENTITY_TYPES = ['USER', ...Object.keys(AUDIT_ENTITY_KEYS)] as [
