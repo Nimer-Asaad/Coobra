@@ -18,6 +18,7 @@ describe('impersonated writes configuration', () => {
         ...base,
         NODE_ENV,
         COOKIE_SECURE: 'true',
+        TRUST_PROXY: '0',
         CONSEQUENCE_SIGNING_KEYS: `k1:${secret()}`,
         CONSEQUENCE_SIGNING_ACTIVE_KEY: 'k1',
       });

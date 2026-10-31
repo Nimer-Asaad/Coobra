@@ -198,6 +198,10 @@ export class ImpersonationService {
         const people = await tx.$queryRaw<{ id: string; role: UserRole; status: string }[]>`
           SELECT id, role::text AS role, status::text AS status FROM users
           WHERE id IN (${actorId}::uuid, ${targetId}::uuid) ORDER BY id FOR UPDATE`;
+        // The admin again, under the lock: a deactivation or role change that committed after
+        // this request was authenticated must not leave an impersonation behind.
+        const actor = people.find((p) => p.id === actorId);
+        if (actor?.status !== 'ACTIVE' || actor.role !== 'SUPER_ADMIN') throw Errors.forbidden();
         const target = people.find((p) => p.id === targetId);
         if (!target) throw Errors.notFound();
         if (
@@ -206,10 +210,14 @@ export class ImpersonationService {
         ) {
           throw notAllowed();
         }
-        // The step-up is used up by this start (and kept if the start fails: rolled back).
+        // The step-up is used up by this start (and kept if the start fails: rolled back). The
+        // admin session must still be live: the condition is re-checked on the locked row, so a
+        // sign-out committed meanwhile refuses the start.
         const stepUp = await tx.session.updateMany({
           where: {
             id: auth.session.id,
+            revokedAt: null,
+            expiresAt: { gt: now },
             reauthenticatedAt: {
               gte: new Date(now.getTime() - IMPERSONATION_STEP_UP_WINDOW_MINUTES * MINUTE),
             },

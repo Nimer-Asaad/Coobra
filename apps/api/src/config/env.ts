@@ -16,7 +16,12 @@ const envSchema = z
           .map((origin) => origin.trim())
           .filter(Boolean),
       ),
-    TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+    /**
+     * How many reverse proxies (load balancer, CDN, ingress) sit in front of the API; 0 when it is
+     * reached directly. Required in production: it decides the client address used by rate limits
+     * and the audit log, so it is never guessed. See docs/deployment.md.
+     */
+    TRUST_PROXY: z.coerce.number().int().min(0).optional(),
     SESSION_TTL_HOURS_ADMIN: z.coerce.number().positive().default(12),
     SESSION_TTL_DAYS_MOBILE: z.coerce.number().positive().default(30),
     COOKIE_SECURE: booleanString.default(false),
@@ -52,6 +57,21 @@ const envSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['COOKIE_SECURE'],
+        message: 'must be true in production',
+      });
+    }
+    if (env.TRUST_PROXY === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRUST_PROXY'],
+        message:
+          'must be set in production to the number of reverse proxies in front of the API (0 if none)',
+      });
+    }
+    if (!env.RATE_LIMIT_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['RATE_LIMIT_ENABLED'],
         message: 'must be true in production',
       });
     }
@@ -225,7 +245,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     port: env.API_PORT,
     databaseUrl: env.DATABASE_URL,
     corsOrigins: env.CORS_ORIGINS,
-    trustProxy: env.TRUST_PROXY,
+    trustProxy: env.TRUST_PROXY ?? 0,
     session: {
       adminTtlMs: env.SESSION_TTL_HOURS_ADMIN * HOUR_MS,
       mobileTtlMs: env.SESSION_TTL_DAYS_MOBILE * 24 * HOUR_MS,
@@ -252,4 +272,41 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       },
     },
   };
+}
+
+export interface StartupDiagnostic {
+  level: 'log' | 'error';
+  message: string;
+}
+
+/**
+ * What the API prints at start-up about its security settings (setting names and switches only,
+ * never values that could be secret). An operator can see at once why impersonation or
+ * impersonated writes are off.
+ */
+export function startupDiagnostics(config: AppConfig): StartupDiagnostic[] {
+  const on = (value: boolean) => (value ? 'on' : 'off');
+  const out: StartupDiagnostic[] = [
+    {
+      level: 'log',
+      message:
+        `Security: rate limiting ${on(config.rateLimitEnabled)}, trusted proxies ${config.trustProxy}, ` +
+        `impersonation ${on(config.impersonation.enabled)}, impersonated writes ${on(config.impersonationWrites.enabled)}`,
+    },
+  ];
+  if (!config.impersonation.enabled) {
+    out.push({
+      level: 'error',
+      message: `Impersonation is disabled: ${config.impersonation.problems.join('; ')} (ADR 0003 R4)`,
+    });
+  }
+  const writes = config.impersonationWrites;
+  const requested = !writes.problems.includes('IMPERSONATION_WRITES_ENABLED is false');
+  if (requested && !writes.enabled) {
+    out.push({
+      level: 'error',
+      message: `Impersonated writes were requested but are disabled: ${writes.problems.join('; ')}`,
+    });
+  }
+  return out;
 }

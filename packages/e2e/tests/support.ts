@@ -37,6 +37,20 @@ export const zones = seed.zones;
 /** Direct access to coobra_e2e, only to verify journal entries and balances. */
 export const db = createPrismaClient({ connectionString: seed.databaseUrl });
 
+/** Collects the Content Security Policy violations a page reports (expected: none). */
+export function watchCsp(page: Page): string[] {
+  const violations: string[] = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy/i.test(message.text())) violations.push(message.text());
+  });
+  return violations;
+}
+
+/** True when the page scrolls sideways (content wider than the viewport). */
+export function overflowsHorizontally(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+}
+
 /** Signed balance of a ledger account in its normal direction ("0.00" when unused). */
 export async function balance(code: string): Promise<string> {
   const account = await db.financialAccount.findUnique({ where: { code } });
@@ -98,11 +112,24 @@ export async function submitAdminLogin(page: Page, name: AccountName): Promise<n
   return submit();
 }
 
-/** A fresh, isolated browser context per role (separate cookies and storage). */
-export async function signInAdmin(browser: Browser, name: AccountName): Promise<Page> {
+/**
+ * A fresh, isolated browser context per role (separate cookies and storage), in English unless
+ * `language` is 'ar' (Arabic, right to left).
+ */
+export async function signInAdmin(
+  browser: Browser,
+  name: AccountName,
+  language: 'en' | 'ar' = 'en',
+): Promise<Page> {
   const page = await (await browser.newContext()).newPage();
   await page.goto(`${URLS.admin}/login`);
-  await chooseEnglishOnFirstVisit(page, page.locator('input[name="email"]'));
+  const email = page.locator('input[name="email"]');
+  if (language === 'ar') {
+    await page.getByRole('button', { name: 'العربية', exact: true }).click();
+    await expect(email).toBeVisible();
+  } else {
+    await chooseEnglishOnFirstVisit(page, email);
+  }
   expect(await submitAdminLogin(page, name), `sign-in of ${name}`).toBe(200);
   await page.waitForURL(/\/dashboard/);
   return page;

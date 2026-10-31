@@ -24,6 +24,23 @@ export interface AuthResult extends CreatedSession {
 
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
+/**
+ * Per-account failed-login limit, shared by every API instance through the database: wrong
+ * passwords are the AUTH_LOGIN_FAILED audit entries themselves. After LOGIN_MAX_FAILURES within
+ * LOGIN_FAILURE_WINDOW_MS (counted from the last password change, so a reset clears it) the
+ * account refuses every password, the right one included, until the window moves on.
+ */
+export const LOGIN_MAX_FAILURES = 10;
+export const LOGIN_FAILURE_WINDOW_MS = 15 * MINUTE_MS;
+/** How long one attempt may wait for another attempt on the same email (PostgreSQL interval). */
+const LOGIN_LOCK_WAIT = '2s';
+
+/** PostgreSQL lock_not_available (55P03), however the driver reports it. */
+function isLockTimeout(error: unknown): boolean {
+  return /55P03|lock timeout/i.test(
+    String(error) + JSON.stringify((error as { meta?: unknown })?.meta ?? {}),
+  );
+}
 
 export function isUniqueViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
@@ -93,24 +110,7 @@ export class AuthService {
       include: { merchantProfile: true },
     });
 
-    if (!user?.passwordHash) {
-      await this.passwords.verifyAgainstDummy(input.password);
-      await this.audit.record({
-        action: 'AUTH_LOGIN_FAILED',
-        targetUserId: user?.id ?? null,
-        meta,
-        metadata: { reason: user ? 'NO_PASSWORD' : 'UNKNOWN_EMAIL', clientApp: input.clientApp },
-      });
-      throw Errors.invalidCredentials();
-    }
-
-    if (!(await this.passwords.verify(user.passwordHash, input.password))) {
-      await this.audit.record({
-        action: 'AUTH_LOGIN_FAILED',
-        targetUserId: user.id,
-        meta,
-        metadata: { reason: 'WRONG_PASSWORD', clientApp: input.clientApp },
-      });
+    if (!(await this.checkPassword(input, user, meta)) || !user?.passwordHash) {
       throw Errors.invalidCredentials();
     }
 
@@ -147,6 +147,75 @@ export class AuthService {
       metadata: { clientApp: input.clientApp, sessionId: session.session.id },
     });
     return { user: current, ...session };
+  }
+
+  /**
+   * The password check, under the per-account limit (shared by every API instance).
+   *
+   * Attempts for one email are serialised by a transaction-scoped advisory lock keyed by the
+   * email, so at most LOGIN_MAX_FAILURES wrong passwords are ever evaluated in a window, however
+   * many requests arrive at once. Unknown emails take the same lock and the same work, so neither
+   * the answer, its timing nor contention tells whether an email has an account. A locked
+   * account answers exactly like a wrong password. Waiting for the lock is capped
+   * (LOGIN_LOCK_WAIT): a request that cannot get it is refused like a wrong password without a
+   * password check, so a flood on one account cannot hold database connections.
+   */
+  private async checkPassword(
+    input: LoginInput,
+    user: { id: string } | null,
+    meta: RequestMeta,
+  ): Promise<boolean> {
+    const lockKey = `coobra:login:${input.email}`;
+    try {
+      return await this.prisma.client.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${LOGIN_LOCK_WAIT}'`);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+        const now = new Date();
+        const failed = async (reason: string) => {
+          await this.audit.recordIn(tx, {
+            action: 'AUTH_LOGIN_FAILED',
+            targetUserId: user?.id ?? null,
+            meta,
+            metadata: { reason, clientApp: input.clientApp },
+            at: now,
+          });
+          return false;
+        };
+        const account = user
+          ? await tx.user.findUnique({
+              where: { id: user.id },
+              select: { passwordHash: true, passwordChangedAt: true },
+            })
+          : null;
+        if (!account?.passwordHash) {
+          await this.passwords.verifyAgainstDummy(input.password);
+          return failed(account ? 'NO_PASSWORD' : 'UNKNOWN_EMAIL');
+        }
+        const windowStart = new Date(now.getTime() - LOGIN_FAILURE_WINDOW_MS);
+        const since =
+          account.passwordChangedAt && account.passwordChangedAt > windowStart
+            ? account.passwordChangedAt
+            : windowStart;
+        const failures = await tx.auditLog.count({
+          where: {
+            action: 'AUTH_LOGIN_FAILED',
+            targetUserId: user!.id,
+            createdAt: { gte: since },
+            metadata: { path: ['reason'], equals: 'WRONG_PASSWORD' },
+          },
+        });
+        if (failures >= LOGIN_MAX_FAILURES) {
+          await this.passwords.verifyAgainstDummy(input.password);
+          // Recorded for the audit log, but not counted: the lock does not extend itself.
+          return failed('LOCKED');
+        }
+        if (await this.passwords.verify(account.passwordHash, input.password)) return true;
+        return failed('WRONG_PASSWORD');
+      });
+    } catch (error) {
+      if (isLockTimeout(error)) return false;
+      throw error;
+    }
   }
 
   async logout(userId: string, sessionId: string, meta: RequestMeta): Promise<void> {

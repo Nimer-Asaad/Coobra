@@ -741,7 +741,7 @@ the URL` runs close to Vitest's 5-second limit under a fully parallel run and al
 | 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | Done; approved at `de7506b` (§19, §20)                                       |
 | 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | Done; approved at `bef8bc9` (§21)                                            |
 | 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | Done; approved at `9ac5a5e` (§22)                                            |
-| 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | Owner reviews the PR                                                         |
+| 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | In progress: review and hardening done, awaiting owner review (§23)          |
 
 ## 17. Phase 4C.1 validation record (2026-10-30)
 
@@ -1014,3 +1014,34 @@ decision decides, and a refusal reloads the list); eligibility costs a few queri
 adjustment (fine at the current list limit of 200); shortfall and fee-correction approvals are
 not disabled in advance (the API's refusal is shown); the adjustment review screen is covered by
 component and integration tests, not by an E2E journey.
+
+## 23. Phase 4C.6 release-readiness hardening (2026-10-31)
+
+The read-only release review against `main` found no critical issue. The owner approved this
+hardening before the pull request:
+
+- **Sign-in limit per account (shared by every instance).** After 10 wrong passwords in 15 minutes
+  an account refuses every password until the window moves on or the password changes. The
+  failures are the `AUTH_LOGIN_FAILED` audit entries; attempts on one email are serialised by a
+  transaction-scoped advisory lock keyed by the email (unknown emails take the same path), with
+  at most 2 seconds of waiting. A locked account answers exactly like a wrong password, so the
+  limit reveals nothing about which emails have accounts. No migration.
+- **Production settings.** `TRUST_PROXY` must be set explicitly (never guessed) and
+  `RATE_LIMIT_ENABLED` must be true; the API logs a `ProxyTrust` error when forwarded hops do
+  not match the setting, and one `Security:` line at start-up (plus why impersonation or
+  requested impersonated writes are off).
+- **Start re-checks under its locks.** The admin must still be an active SUPER_ADMIN, and the
+  admin session must be unrevoked and unexpired (checked on the locked row), so a deactivation,
+  role change or sign-out that commits meanwhile leaves no impersonation behind.
+- **Admin console CSP.** A per-request nonce with `strict-dynamic`, same-origin connections, no
+  framing; the hand-off is unaffected (window.open and postMessage are outside CSP). HSTS is set
+  at the HTTPS edge (`docs/deployment.md`).
+- **CI.** A separate end-to-end job on a job-local PostgreSQL container (`coobra_e2e` only):
+  impersonation, adjustment review, Arabic RTL, phone widths and CSP violations.
+- **Deployment runbook** (`docs/deployment.md`): environment, proxy trust, edge rate limits,
+  secrets and key rotation, migration locking, backup, rehearsal and recovery, outbox monitoring.
+
+Remaining before production (operations, not code): per-address limits at the edge, HSTS, the
+`TRUST_PROXY` count verified on the real topology, and a maintenance window for migration 14 if
+the production tables are large. The in-process per-address limits stay per instance (no Redis,
+by decision).

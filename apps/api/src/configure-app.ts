@@ -1,6 +1,7 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AUTH_TRANSPORT_HEADER, IDEMPOTENCY_HEADER, IMPERSONATION_HEADER } from '@coobra/shared';
+import { proxyTrustMonitor } from './common/proxy-trust.js';
 import type { AppConfig } from './config/env.js';
 
 export const API_PREFIX = 'v1';
@@ -10,6 +11,7 @@ export const API_PREFIX_EXCLUDE = ['health', 'health/ready'];
 /** HTTP-level setup shared by the real server and the integration tests. */
 export function configureApp(app: NestExpressApplication, config: AppConfig): void {
   app.set('trust proxy', config.trustProxy);
+  app.use(proxyTrustMonitor(config.trustProxy));
   app.disable('x-powered-by');
   app.use(helmet());
   app.enableCors({

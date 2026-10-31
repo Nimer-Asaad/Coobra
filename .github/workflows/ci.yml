@@ -101,3 +101,77 @@ jobs:
 
       - name: Export mobile web builds
         run: pnpm export:web
+
+  e2e:
+    name: End-to-end smoke (isolated stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      postgres:
+        # A throwaway container of its own: the E2E stack recreates coobra_e2e in it. Never a
+        # development, shared or production database.
+        image: postgres:16-alpine
+        env:
+          # Test-only credentials for a disposable container; not a secret.
+          POSTGRES_USER: coobra_e2e
+          POSTGRES_PASSWORD: coobra_e2e_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U coobra_e2e -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # prepare-db.mjs refuses any database but coobra_e2e and drops/recreates only that one.
+      E2E_DATABASE_URL: postgresql://coobra_e2e:coobra_e2e_only@localhost:5432/coobra_e2e?schema=public
+      TURBO_TELEMETRY_DISABLED: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+      EXPO_NO_TELEMETRY: '1'
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Refuse anything but the job's own coobra_e2e
+        run: |
+          node -e '
+            const url = new URL(process.env.E2E_DATABASE_URL);
+            if (url.hostname !== "localhost" || url.pathname !== "/coobra_e2e") {
+              console.error("E2E must use the job-local coobra_e2e database only");
+              process.exit(1);
+            }'
+
+      - name: Build the workspace packages the stack uses
+        run: pnpm turbo run build --filter=@coobra/api^... --filter=@coobra/admin-web^... --filter=@coobra/e2e^...
+
+      - name: Install the Playwright browser
+        run: pnpm --filter @coobra/e2e exec playwright install --with-deps chromium
+
+      - name: End-to-end smoke tests
+        # Impersonation (merchant and driver), adjustment review, Arabic RTL, phone widths, CSP.
+        run: pnpm --filter @coobra/e2e test:e2e
+
+      - name: Keep traces of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          # Test accounts only (random passwords for a throwaway database).
+          path: packages/e2e/test-results
+          retention-days: 7

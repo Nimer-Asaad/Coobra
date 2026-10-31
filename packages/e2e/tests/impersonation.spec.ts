@@ -1,5 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
-import { accounts, apiAs, db, signInAdmin, URLS, zones } from './support';
+import {
+  accounts,
+  apiAs,
+  db,
+  overflowsHorizontally,
+  signInAdmin,
+  URLS,
+  watchCsp,
+  zones,
+} from './support';
 
 /*
  * Phase 4C.5: a SUPER_ADMIN acts as a merchant and as a driver from the admin console, in the
@@ -70,6 +79,8 @@ test('admin acts as the merchant: confirmed charges, a price change, blocked con
   browser,
 }) => {
   const admin = await signInAdmin(browser, 'admin');
+  // The hand-off (window.open + postMessage) must work under the console's CSP.
+  const csp = watchCsp(admin);
   // The admin's browser also has the merchant's own session open: it must survive untouched.
   const ownTab = await admin.context().newPage();
   await ownTab.goto(`${URLS.merchant}/login`);
@@ -94,6 +105,13 @@ test('admin acts as the merchant: confirmed charges, a price change, blocked con
   await expect(admin.getByRole('region', { name: 'Your active impersonation' })).toBeVisible();
   await snap(admin, 'admin-active-bar');
   await snap(tab, 'merchant-banner-home');
+  // Phone width: the banner (account, time left, End) stays on screen and nothing overflows.
+  await tab.setViewportSize({ width: 390, height: 844 });
+  await expect(tab.getByTestId('impersonation-banner')).toBeInViewport();
+  await expect(tab.getByTestId('impersonation-remaining')).toBeVisible();
+  expect(await overflowsHorizontally(tab)).toBe(false);
+  await snap(tab, 'merchant-banner-phone');
+  await tab.setViewportSize({ width: 1280, height: 720 });
 
   // Create a shipment: the charges are previewed by the server and confirmed.
   await tab.goto(`${URLS.merchant}/shipments/new`);
@@ -185,6 +203,7 @@ test('admin acts as the merchant: confirmed charges, a price change, blocked con
   await expect(admin.getByRole('button', { name: 'acting as E2E merchant' }).first()).toBeVisible();
   await snap(admin, 'admin-audit-acting-as');
   await ops.dispose();
+  expect(csp).toEqual([]);
 });
 
 test('admin acts as the driver: reasons, a confirmed failure, blocked delivery, revocation', async ({

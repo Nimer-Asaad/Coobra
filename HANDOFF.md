@@ -12,11 +12,12 @@ Branch: `feature/phase4c-impersonation` (not merged into main). Design record:
 | 4C.3 Lifecycle and security gate             | Approved    | `de7506b` |
 | 4C.4 Impersonated writes (off by default)    | Approved    | `bef8bc9` |
 | 4C.5 Impersonation UI                        | Approved    | `9ac5a5e` |
-| 4C.6 E2E journeys, security review, docs, PR | Not started | —         |
+| 4C.6 E2E journeys, security review, docs, PR | In progress | —         |
 
 ## Pending
 
-1. Phase 4C.6 (needs owner approval to start): release-readiness review, E2E journeys, docs, PR.
+1. Phase 4C.6: the review and hardening (ADR §23) await owner review; then commit, push and open
+   the PR **against `main`** (the GitHub default branch is still an old branch).
 
 4C.5 was approved on 2026-10-31 at `9ac5a5e` (with the ADR §22 follow-ups: the audit-log E2E
 race, "Act as" in the users list, server-computed adjustment review eligibility). `826a3b2`
@@ -26,12 +27,14 @@ Known risks carried into 4C.6 (ADR §22): eligibility can be stale until the dec
 re-checks everything); a few queries per pending adjustment; shortfall and fee-correction
 approvals are not disabled in advance; the adjustment review screen has no E2E journey.
 
-## Last test results (4C.5, 2026-10-31)
+## Last test results (4C.6 hardening, 2026-10-31, not yet committed)
 
-- Typecheck, lint and Prettier: clean.
-- Unit and component: 259 passed (shared 84, i18n 5, mobile-core 21, api 60, admin-web 89).
-- API integration (scratch database): 17 files, 205 passed.
-- E2E, isolated stack: full suite 9/9; the audit-log test 5/5 repeated.
+- Typecheck, lint, Prettier and `db:validate`: clean.
+- Unit and component: 267 passed (shared 84, i18n 5, mobile-core 21, api 66, admin-web 91).
+- API integration (scratch database): 17 files, 211 passed.
+- E2E, isolated stack: 11/11 (new: adjustment review in Arabic and at phone width, users list on
+  a phone, impersonation banner at phone width, no CSP violations).
+- The new CI `e2e` job has not run on GitHub yet (it runs on the PR).
 
 ## Safety rules
 

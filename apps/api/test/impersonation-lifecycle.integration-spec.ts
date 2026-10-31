@@ -2,7 +2,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Server as App } from 'node:http';
 import { IMPERSONATION_HEADER, IMPERSONATION_ROUTE_POLICY } from '@coobra/shared';
+import { selfActing } from '../src/common/acting-context.js';
 import { CLOCK, type Clock } from '../src/common/clock.js';
+import type { RequestAuth } from '../src/common/request.js';
+import { ImpersonationService } from '../src/impersonation/impersonation.service.js';
 import { ImpersonationSweeper } from '../src/impersonation/impersonation-sweeper.service.js';
 import {
   createSignedInUser,
@@ -305,6 +308,66 @@ describe('Impersonation lifecycle (PostgreSQL integration)', () => {
         .post(`/v1/admin/impersonations/${c.res.body.impersonation.id}/end`)
         .expect(200);
       await exchange(c.res.body.code, c.verifier).expect(401); // ended before the hand-off
+    });
+
+    /**
+     * The request was authenticated, then (before its start transaction) the admin was
+     * deactivated, demoted or signed out. The start re-checks under its locks and leaves nothing.
+     */
+    describe('a change that commits between authentication and the start', () => {
+      const meta = { ipAddress: null, userAgent: null };
+      async function authenticatedNow(user: TestUser): Promise<RequestAuth> {
+        const session = await ctx.prisma.session.findFirstOrThrow({
+          where: { userId: user.id, revokedAt: null, impersonationId: null },
+          orderBy: { createdAt: 'desc' },
+        });
+        const row = await ctx.prisma.user.findUniqueOrThrow({
+          where: { id: user.id },
+          include: { merchantProfile: true },
+        });
+        return { user: row, session, transport: 'bearer', acting: selfActing(row) };
+      }
+      const startWith = (auth: RequestAuth) =>
+        ctx.app.get(ImpersonationService).start(
+          auth,
+          {
+            targetUserId: merchant.id,
+            reason: 'Customer asked for help',
+            ticketReference: undefined,
+            codeChallenge: pkce().challenge,
+          },
+          undefined,
+          meta,
+        );
+      const nothingStarted = async () =>
+        expect(await ctx.prisma.impersonationSession.count()).toBe(0);
+
+      it('refuses an admin deactivated meanwhile', async () => {
+        await reauth();
+        const auth = await authenticatedNow(admin);
+        await ctx.prisma.user.update({ where: { id: admin.id }, data: { status: 'DISABLED' } });
+        await expect(startWith(auth)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+        await nothingStarted();
+      });
+
+      it('refuses an admin whose role changed meanwhile', async () => {
+        await reauth();
+        const auth = await authenticatedNow(admin);
+        await ctx.prisma.user.update({ where: { id: admin.id }, data: { role: 'OPERATIONS' } });
+        await expect(startWith(auth)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+        await nothingStarted();
+      });
+
+      it('refuses an admin session signed out meanwhile', async () => {
+        await reauth();
+        const auth = await authenticatedNow(admin);
+        await ctx.prisma.session.update({
+          where: { id: auth.session.id },
+          data: { revokedAt: new Date() },
+        });
+        await expect(startWith(auth)).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+        await nothingStarted();
+      });
     });
   });
 

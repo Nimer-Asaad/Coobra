@@ -38,12 +38,7 @@ export class ImpersonationSweeper implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    if (!this.config.impersonation.enabled) {
-      // Setting names only; never values that could be secret.
-      this.logger.error(
-        `Impersonation is disabled: ${this.config.impersonation.problems.join('; ')} (ADR 0003 R4)`,
-      );
-    }
+    // Why impersonation may be off is logged once at start-up (startupDiagnostics in main.ts).
     if (!this.config.impersonationSweeperEnabled) return;
     this.timer = setInterval(() => void this.tick(), SWEEP_INTERVAL_MS);
     this.timer.unref();

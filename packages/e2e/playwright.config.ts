@@ -34,6 +34,8 @@ const apiEnv = env({
   DRIVER_APP_URL: URLS.driver,
   COOKIE_SECURE: 'false',
   MAIL_TRANSPORT: 'log',
+  // Everything the API needs is set here, so CI (which has no .env) runs the same stack.
+  MAIL_FROM: 'COOBRA E2E <e2e@coobra.test>',
   // Impersonated writes are enabled only in this isolated stack (never in development): a
   // random signing key per run, held only by this process and the API it starts.
   IMPERSONATION_WRITES_ENABLED: 'true',
