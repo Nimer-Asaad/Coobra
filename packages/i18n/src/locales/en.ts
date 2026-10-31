@@ -413,6 +413,14 @@ export const en = {
     settlementRecorded: 'Hand-over registered. An accountant will count the cash and confirm it.',
     discrepancy: 'Difference',
     countByAnotherAccountant: 'You registered this hand-over; another accountant must count it.',
+    reviewRefusal: {
+      OWN_REQUEST:
+        'You requested this adjustment, so another finance colleague must approve or reject it.',
+      OVER_LIMIT: 'This amount is above your approval limit, so a super admin must decide it.',
+      CONFLICT_OF_INTEREST:
+        'You were involved in what this adjustment corrects, or acted as this merchant, so an independent colleague must decide it.',
+      UNKNOWN: 'Whether you can decide this could not be checked. Reload the page and try again.',
+    },
     driver: 'Driver',
     chooseDriver: 'Choose a driver',
     shortages: 'Driver cash shortages',
@@ -1021,6 +1029,7 @@ export const en = {
   impersonation: {
     admin: {
       start: 'Act as this account',
+      startFor: 'Act as this account ({{name}})',
       startTitle: 'Act as {{name}}',
       intro:
         'Opens the {{app}} app in a new tab, signed in as this account. Your own session stays as it is.',

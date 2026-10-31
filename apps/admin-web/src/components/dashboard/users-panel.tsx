@@ -17,6 +17,10 @@ import {
 } from '@coobra/shared';
 import { translateValidation } from '@coobra/i18n';
 import { ErrorAlert } from '@/components/error-alert';
+import {
+  ImpersonateAction,
+  type ImpersonationAppUrls,
+} from '@/components/impersonation/impersonate-action';
 import { FormField } from '@/components/form-field';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -34,7 +38,13 @@ const PAGE_SIZE = 20;
 const FILTER_KEYS = ['q', 'role', 'status'] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 
-export function UsersPanel() {
+export function UsersPanel({
+  currentUserId = '',
+  appUrls = { MERCHANT: null, DRIVER: null },
+}: {
+  currentUserId?: string;
+  appUrls?: ImpersonationAppUrls;
+}) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -142,6 +152,7 @@ export function UsersPanel() {
                       <th className="py-2 text-start font-medium">{t('users.role')}</th>
                       <th className="py-2 text-start font-medium">{t('users.status')}</th>
                       <th className="py-2 text-start font-medium">{t('users.createdAt')}</th>
+                      <th className="py-2 text-start font-medium">{t('users.actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -166,8 +177,17 @@ export function UsersPanel() {
                         <td className="py-2.5 pe-3">
                           <UserStatusBadge status={user.status} />
                         </td>
-                        <td className="py-2.5 whitespace-nowrap text-muted-foreground">
+                        <td className="py-2.5 pe-3 whitespace-nowrap text-muted-foreground">
                           {formatDateTime(user.createdAt, i18n.language)}
+                        </td>
+                        <td className="py-2.5 align-top">
+                          {/* Merchants and drivers only; staff rows have no actions. */}
+                          <ImpersonateAction
+                            user={user}
+                            currentUserId={currentUserId}
+                            appUrls={appUrls}
+                            layout="row"
+                          />
                         </td>
                       </tr>
                     ))}

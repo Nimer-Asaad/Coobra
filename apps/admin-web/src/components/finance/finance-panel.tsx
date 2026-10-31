@@ -2,7 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useState } from 'react';
+import type { TFunction } from 'i18next';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CASH_CHANNELS,
@@ -795,33 +796,81 @@ export function SettlementRow({
   );
 }
 
-/** Approve / reject buttons for an item that needs a second person's decision. */
-function DecisionButtons({ path }: { path: string }) {
+/**
+ * Approve / reject buttons for an item that needs a second person's decision. `approveBlocked`
+ * and `rejectBlocked` are the reasons each is refused in advance, when the server already said
+ * so; the API still decides every submitted decision, and its refusal is shown.
+ */
+function DecisionButtons({
+  path,
+  approveBlocked,
+  rejectBlocked,
+}: {
+  path: string;
+  approveBlocked?: string;
+  rejectBlocked?: string;
+}) {
   const { t } = useTranslation();
   const approve = useBffPost(`${path}/approve`);
   const reject = useBffPost(`${path}/reject`);
+  const approveReasonId = useId();
+  const rejectReasonId = useId();
+  // One explanation when both are refused for the same reason.
+  const sameReason = approveBlocked === rejectBlocked;
+  const rejectReason = sameReason ? approveReasonId : rejectReasonId;
   return (
-    <div className="flex flex-wrap gap-2">
-      <InlineAction
-        label={t('finance.approve')}
-        variant="default"
-        pending={approve.isPending}
-        error={approve.error}
-        onSubmit={(form) => approve.mutateAsync({ note: optional(form, 'note') })}
-      >
-        <FormField name="note" label={t('finance.note')} />
-      </InlineAction>
-      <InlineAction
-        label={t('finance.reject')}
-        variant="destructive"
-        pending={reject.isPending}
-        error={reject.error}
-        onSubmit={(form) => reject.mutateAsync({ note: text(form, 'note') })}
-      >
-        <FormField name="note" label={t('finance.reason')} />
-      </InlineAction>
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
+        <InlineAction
+          label={t('finance.approve')}
+          variant="default"
+          disabled={Boolean(approveBlocked)}
+          describedBy={approveBlocked ? approveReasonId : undefined}
+          pending={approve.isPending}
+          error={approve.error}
+          onSubmit={(form) => approve.mutateAsync({ note: optional(form, 'note') })}
+        >
+          <FormField name="note" label={t('finance.note')} />
+        </InlineAction>
+        <InlineAction
+          label={t('finance.reject')}
+          variant="destructive"
+          disabled={Boolean(rejectBlocked)}
+          describedBy={rejectBlocked ? rejectReason : undefined}
+          pending={reject.isPending}
+          error={reject.error}
+          onSubmit={(form) => reject.mutateAsync({ note: text(form, 'note') })}
+        >
+          <FormField name="note" label={t('finance.reason')} />
+        </InlineAction>
+      </div>
+      {approveBlocked ? (
+        <p id={approveReasonId} className="text-muted-foreground">
+          {approveBlocked}
+        </p>
+      ) : null}
+      {rejectBlocked && !sameReason ? (
+        <p id={rejectReasonId} className="text-muted-foreground">
+          {rejectBlocked}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Why the viewer cannot take this decision, from the server's own eligibility (computed with
+ * the rules the decision enforces). Fails closed: no eligibility (an older server, a failed
+ * check) is a refusal too. Display only: the API decides.
+ */
+function reviewRefusal(
+  t: TFunction,
+  item: AdjustmentItem,
+  action: 'approve' | 'reject',
+): string | undefined {
+  const eligibility = item.review?.[action];
+  if (eligibility?.allowed) return undefined;
+  return t(`finance.reviewRefusal.${eligibility?.reason ?? 'UNKNOWN'}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,7 +1120,7 @@ interface FeeCorrection {
   createdAt: string;
 }
 
-function ReviewsTab({
+export function ReviewsTab({
   canDecide,
   canPropose,
   canSeeMoney,
@@ -1217,7 +1266,11 @@ function ReviewsTab({
                     </p>
                     <AdjustmentSourceLabel item={item} />
                     {canDecide && item.status === 'PENDING_APPROVAL' ? (
-                      <DecisionButtons path={`/v1/admin/finance/adjustments/${item.id}`} />
+                      <DecisionButtons
+                        path={`/v1/admin/finance/adjustments/${item.id}`}
+                        approveBlocked={reviewRefusal(t, item, 'approve')}
+                        rejectBlocked={reviewRefusal(t, item, 'reject')}
+                      />
                     ) : null}
                   </li>
                 ))}

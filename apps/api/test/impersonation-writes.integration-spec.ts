@@ -4,10 +4,14 @@ import type { Server as App } from 'node:http';
 import {
   IMPERSONATION_HEADER,
   IMPERSONATION_ROUTE_POLICY,
+  type AdjustmentItem,
+  type AdjustmentReview,
   type ConsequencePreview,
+  type ReviewEligibility,
 } from '@coobra/shared';
 import { AuditService } from '../src/audit/audit.service.js';
 import { CLOCK, type Clock } from '../src/common/clock.js';
+import { ApprovalService } from '../src/finance/approval.service.js';
 import { endImpersonationIn } from '../src/impersonation/impersonation-records.js';
 import {
   createSignedInUser,
@@ -806,6 +810,125 @@ describe('Impersonated writes (PostgreSQL integration)', () => {
       await bearer(otherAdmin)
         .post(`/v1/admin/finance/adjustments/${unlinked.body.id}/approve`, {})
         .expect(200);
+    });
+
+    it('tells each reviewer in advance whether they may decide, and still checks the decision', async () => {
+      // The admin acted as the merchant (and created a shipment as them), then ended it.
+      const { as, id: impId } = await impersonate(merchant);
+      const preview = await previewCreate(as);
+      const shipment = await as
+        .post('/v1/merchant/shipments', {
+          ...shipmentInput(),
+          confirmationToken: preview.confirmationToken,
+        })
+        .expect(201);
+      await bearer(admin).post(`/v1/admin/impersonations/${impId}/end`).expect(200);
+      const accountant2 = await createSignedInUser(ctx, 'ACCOUNTANT', 'accountant2@example.com');
+      const owner = await createSignedInUser(ctx, 'OWNER_VIEWER', 'owner@example.com');
+      const ask = async (amount: string, body: object = {}) =>
+        (
+          await bearer(accountant)
+            .post('/v1/admin/finance/adjustments', {
+              type: 'MERCHANT_CREDIT',
+              merchantId: merchant.id,
+              amount,
+              reason: 'Goodwill credit',
+              ...body,
+            })
+            .expect(201)
+        ).body.id as string;
+      const small = await ask('5'); // UNLINKED
+      const large = await ask('500'); // UNLINKED, above the 200.00 approval threshold
+      const linked = await ask('5', {
+        sourceType: 'SHIPMENT_FEE',
+        sourceShipmentId: shipment.body.id,
+      });
+      const reviewOf = async (user: TestUser) => {
+        const res = await bearer(user).get('/v1/admin/finance/adjustments').expect(200);
+        return Object.fromEntries(
+          (res.body as AdjustmentItem[]).map((item) => [item.id, item.review]),
+        ) as Record<string, AdjustmentReview | null>;
+      };
+      const allowed: ReviewEligibility = { allowed: true, reason: null };
+      const refused = (reason: ReviewEligibility['reason']) => ({ allowed: false, reason });
+      const both = (eligibility: ReviewEligibility) => ({
+        approve: eligibility,
+        reject: eligibility,
+        checkedAt: expect.any(String),
+      });
+      const decide = (user: TestUser, id: string, action: 'approve' | 'reject') =>
+        bearer(user).post(`/v1/admin/finance/adjustments/${id}/${action}`, { note: 'Checked' });
+      const before = { money: await moneySnapshot(), audit: await ctx.prisma.auditLog.count() };
+
+      // Own request (maker-checker).
+      expect(await reviewOf(accountant)).toEqual({
+        [small]: both(refused('OWN_REQUEST')),
+        [large]: both(refused('OWN_REQUEST')),
+        [linked]: both(refused('OWN_REQUEST')),
+      });
+      // Another accountant: allowed below the approval threshold, not above it.
+      expect(await reviewOf(accountant2)).toEqual({
+        [small]: both(allowed),
+        [large]: both(refused('OVER_LIMIT')),
+        [linked]: both(allowed),
+      });
+      // The admin who acted as the merchant: involved in the linked shipment, and not
+      // independent for UNLINKED ones (whatever the amount).
+      expect(await reviewOf(admin)).toEqual({
+        [small]: both(refused('CONFLICT_OF_INTEREST')),
+        [large]: both(refused('CONFLICT_OF_INTEREST')),
+        [linked]: both(refused('CONFLICT_OF_INTEREST')),
+      });
+      // An independent super admin may decide all of them, also above the threshold.
+      expect(await reviewOf(otherAdmin)).toEqual({
+        [small]: both(allowed),
+        [large]: both(allowed),
+        [linked]: both(allowed),
+      });
+      // Viewers who cannot decide get no eligibility at all.
+      expect(Object.values(await reviewOf(owner))).toEqual([null, null, null]);
+      // Reading eligibility wrote nothing.
+      expect({ money: await moneySnapshot(), audit: await ctx.prisma.auditLog.count() }).toEqual(
+        before,
+      );
+
+      // The decision does not rely on the list: every refusal is enforced again.
+      for (const action of ['approve', 'reject'] as const) {
+        expect((await decide(accountant, small, action)).body.code).toBe('SELF_APPROVAL_FORBIDDEN');
+        expect((await decide(accountant2, large, action)).body.code).toBe(
+          'APPROVAL_LIMIT_EXCEEDED',
+        );
+        expect((await decide(admin, small, action)).body.code).toBe('IMPERSONATION_CONFLICT');
+      }
+      // Stale information: accountant2 was told "allowed" on the small one, then the threshold
+      // dropped. The decision is refused, and the list says so on the next read.
+      await ctx.prisma.financeSetting.update({
+        where: { key: 'APPROVAL_THRESHOLD' },
+        data: { value: '1.00' },
+      });
+      expect((await decide(accountant2, small, 'approve')).body.code).toBe(
+        'APPROVAL_LIMIT_EXCEEDED',
+      );
+      expect((await reviewOf(accountant2))[small]).toEqual(both(refused('OVER_LIMIT')));
+      await ctx.prisma.financeSetting.update({
+        where: { key: 'APPROVAL_THRESHOLD' },
+        data: { value: '200.00' },
+      });
+
+      // Decided adjustments carry no eligibility.
+      await decide(otherAdmin, linked, 'approve').expect(200);
+      expect((await reviewOf(otherAdmin))[linked]).toBeNull();
+
+      // When the checks cannot run, every pending item is refused (UNKNOWN), never allowed.
+      const spy = vi
+        .spyOn(ctx.app.get(ApprovalService), 'approvalRefusal')
+        .mockRejectedValueOnce(new Error('unavailable'));
+      const failed = await reviewOf(otherAdmin);
+      spy.mockRestore();
+      expect(failed[small]).toEqual(both(refused('UNKNOWN')));
+      expect(failed[large]).toEqual(both(refused('UNKNOWN')));
+      // ...and the authorized independent reviewer can still decide.
+      await decide(otherAdmin, small, 'approve').expect(200);
     });
   });
 

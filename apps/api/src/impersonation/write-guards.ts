@@ -185,28 +185,35 @@ async function postingDecisionMakers(tx: Tx, entryId: string): Promise<Set<strin
  */
 export async function assertIndependentAdjustmentReviewer(
   tx: Tx,
-  adjustment: {
-    merchantId: string;
-    sourceType: string;
-    sourceShipmentId: string | null;
-    sourceJournalEntryId: string | null;
-  },
+  adjustment: AdjustmentProvenance,
   approverId: string,
 ): Promise<void> {
+  if (await adjustmentReviewerConflict(tx, adjustment, approverId)) throw conflictOfInterest();
+}
+
+export interface AdjustmentProvenance {
+  merchantId: string;
+  sourceType: string;
+  sourceShipmentId: string | null;
+  sourceJournalEntryId: string | null;
+}
+
+/** True when the reviewer is not independent (the rule above); reads only. */
+export async function adjustmentReviewerConflict(
+  tx: Tx,
+  adjustment: AdjustmentProvenance,
+  approverId: string,
+): Promise<boolean> {
   let resolved = adjustment.sourceType !== 'UNLINKED';
   if (adjustment.sourceShipmentId) {
-    if (await shipmentInvolvement(tx, adjustment.sourceShipmentId, approverId)) {
-      throw conflictOfInterest();
-    }
+    if (await shipmentInvolvement(tx, adjustment.sourceShipmentId, approverId)) return true;
     const makers = await shipmentDecisionMakers(tx, adjustment.sourceShipmentId);
-    if (makers.has(approverId)) throw conflictOfInterest();
+    if (makers.has(approverId)) return true;
   }
   if (adjustment.sourceJournalEntryId) {
     const makers = await postingDecisionMakers(tx, adjustment.sourceJournalEntryId);
     if (makers === null) resolved = false;
-    else if (makers.has(approverId)) throw conflictOfInterest();
+    else if (makers.has(approverId)) return true;
   }
-  if (!resolved && (await impersonatedAccount(tx, approverId, adjustment.merchantId))) {
-    throw conflictOfInterest();
-  }
+  return !resolved && (await impersonatedAccount(tx, approverId, adjustment.merchantId));
 }

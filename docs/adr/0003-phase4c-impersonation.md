@@ -988,3 +988,19 @@ API additions; end-to-end journeys in the isolated stack (writes enabled there o
 per run): admin to merchant and admin to driver, tab isolation, the real session untouched, a
 price change mid-confirmation, blocked actions, ending from the banner and from the console, and
 the hand-off page refusing to work without the console.
+
+**Follow-ups (2026-10-31).** The users list offers "Act as this account" on each merchant and
+driver row: the same component, start dialog and hand-off as the account page, with the same
+disabled states and reasons; staff rows have no action. Adjustment review eligibility
+(owner-approved, additive, read-only): for finance reviewers, each `PENDING_APPROVAL` adjustment
+carries `review: { approve, reject, checkedAt }`, each `{ allowed, reason }` with `OWN_REQUEST`,
+`OVER_LIMIT`, `CONFLICT_OF_INTEREST` or `UNKNOWN`. The server computes it in one read-only
+transaction with the same checks the decision runs (`ApprovalService.approvalRefusal`, the single
+source for `assertCanApprove`, and `adjustmentReviewerConflict`, the single source for
+`assertIndependentAdjustmentReviewer`); other roles and decided items get `null`. It fails
+closed: when the checks cannot run every item is `UNKNOWN`, and the console treats a missing
+`review` the same way. Approve and reject are separate fields (their rules are the same today).
+The answer is advisory: approve and reject re-check everything inside their own transaction, and
+a refusal (403) or conflict (409) reloads the list. No migration; no write path or rule changed.
+The audit-log E2E waits for the filter reset before searching, and mobile E2E sign-ins wait out a
+429 once, like the admin sign-in.

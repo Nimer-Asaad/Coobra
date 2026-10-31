@@ -119,7 +119,22 @@ export async function signInMobile(
   await chooseEnglishOnFirstVisit(page, email);
   await email.fill(accounts[name].email);
   await page.getByLabel('Password', { exact: true }).fill(accounts[name].password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  // Same rule as the admin sign-in: only a 429 is waited out and retried, once.
+  const submit = async () => {
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (res) => res.url().endsWith('/v1/auth/login') && res.request().method() === 'POST',
+      ),
+      page.getByRole('button', { name: 'Sign in' }).click(),
+    ]);
+    return response.status();
+  };
+  let status = await submit();
+  if (status === 429) {
+    await page.waitForTimeout(RATE_LIMIT_WAIT_MS);
+    status = await submit();
+  }
+  expect(status, `sign-in of ${name}`).toBe(200);
   await page.waitForURL(/\/home/);
   return page;
 }

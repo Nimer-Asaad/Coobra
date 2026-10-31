@@ -1,4 +1,4 @@
-# COOBRA handoff (2026-10-30)
+# COOBRA handoff (2026-10-31)
 
 Branch: `feature/phase4c-impersonation` (not merged into main). Design record:
 `docs/adr/0003-phase4c-impersonation.md` (§17–§22).
@@ -18,19 +18,17 @@ Branch: `feature/phase4c-impersonation` (not merged into main). Design record:
 
 1. Owner review of the 4C.5 report; on approval, reword the WIP commit (or add an approval
    commit) and mark ADR §16 row 4C.5 as approved.
-2. Fix the race in `packages/e2e/tests/audit-log.spec.ts`: it types a search right after
-   "Clear filters", before the form re-mounts. It also fails on the 4C.4 audit panel, so it is
-   not a 4C.5 regression.
-3. Not built from the 4C.5 plan: the "Act as" entry in the users list row menu, and disabling
-   adjustment Approve in advance for a conflicted reviewer (the API's 403 is shown instead).
-4. Then Phase 4C.6 (needs owner approval to start).
+2. Then Phase 4C.6 (needs owner approval to start).
 
-## Last test results (4C.5)
+Done on 2026-10-31 (ADR §22 follow-ups): the audit-log E2E race, "Act as" in the users list,
+and server-computed adjustment review eligibility.
 
-- Typecheck and lint: clean. Prettier: clean.
-- Unit and component: 249 passed (shared 84, i18n 5, mobile-core 21, api 60, admin-web 79).
-- API integration (scratch database): 17 files, 204 passed (run as two halves: 133 + 71).
-- E2E, isolated stack: impersonation spec 3/3; full suite 8/9 (the audit-log race above).
+## Last test results (4C.5, 2026-10-31)
+
+- Typecheck, lint and Prettier: clean.
+- Unit and component: 259 passed (shared 84, i18n 5, mobile-core 21, api 60, admin-web 89).
+- API integration (scratch database): 17 files, 205 passed.
+- E2E, isolated stack: full suite 9/9; the audit-log test 5/5 repeated.
 
 ## Safety rules
 

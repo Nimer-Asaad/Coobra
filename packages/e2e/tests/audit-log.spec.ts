@@ -17,11 +17,13 @@ test('a super admin finds a change in the audit log; other staff cannot open it'
   expect((await opsApi.get('/v1/admin/audit-logs')).status()).toBe(403);
   await opsApi.dispose();
 
-  // Set-up: the admin corrects the phone number of the operations account.
+  // Set-up: the admin corrects the phone number of the operations account (a new number each
+  // run, so the test can be repeated against the same database).
+  const phone = `0599${String(Date.now()).slice(-6)}`;
   const adminApi = await apiAs('admin', 'ADMIN_WEB');
   const user = await (await adminApi.get(`/v1/admin/users/${accounts.ops.id}`)).json();
   const edit = await adminApi.patch(`/v1/admin/users/${accounts.ops.id}`, {
-    data: { phone: '0599777888', expectedUpdatedAt: user.updatedAt },
+    data: { phone, expectedUpdatedAt: user.updatedAt },
   });
   expect(edit.status(), await edit.text()).toBe(200);
   await adminApi.dispose();
@@ -34,21 +36,36 @@ test('a super admin finds a change in the audit log; other staff cannot open it'
   await admin.getByLabel('Event').selectOption('USER_PROFILE_UPDATED');
   await admin.getByRole('button', { name: 'Apply' }).click();
   await admin.waitForURL(/action=USER_PROFILE_UPDATED/);
-  await expect(admin.getByText('1 entries')).toBeVisible();
+  const edits = await db.auditLog.count({ where: { action: 'USER_PROFILE_UPDATED' } });
+  await expect(admin.getByText(`${edits} entries`)).toBeVisible();
 
   // The entry shows who changed what, with the phone before and after.
-  await admin.getByRole('button', { name: /^Details of Profile edited/ }).click();
+  // Newest first: the first entry is this edit.
+  await admin
+    .getByRole('button', { name: /^Details of Profile edited/ })
+    .first()
+    .click();
   const dialog = admin.getByRole('dialog', { name: 'Profile edited' });
-  const phone = dialog.getByRole('row', { name: /Phone/ });
-  await expect(phone).toContainText('0599777888');
+  await expect(dialog.getByRole('row', { name: /Phone/ })).toContainText(phone);
   await expect(dialog.getByText(/E2E admin · Super admin/)).toBeVisible();
   await admin.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 
   // Searching by the person's email finds the entries about them (their sign-ins too).
-  await admin.getByRole('button', { name: 'Clear filters' }).click();
+  // Clearing re-mounts the form from the URL; wait for that before typing, or the new search
+  // lands in the old form and is discarded.
+  const clear = admin.getByRole('button', { name: 'Clear filters' });
+  await clear.click();
+  await admin.waitForURL((url) => url.pathname.endsWith('/audit') && url.search === '');
+  await expect(clear).toHaveCount(0);
+  await expect(admin.getByLabel('Event')).toHaveValue('');
+  const aboutOps = await db.auditLog.count({
+    where: { OR: [{ actorUserId: accounts.ops.id }, { targetUserId: accounts.ops.id }] },
+  });
   await admin.getByLabel('Search', { exact: true }).fill(accounts.ops.email);
   await admin.getByRole('button', { name: 'Apply' }).click();
+  await admin.waitForURL(/[?&]q=/);
+  await expect(admin.getByText(`${aboutOps} entries`)).toBeVisible();
   await expect(admin.getByRole('button', { name: /^Details of Signed in/ }).first()).toBeVisible();
 
   // Reading the log wrote nothing and changed nothing.

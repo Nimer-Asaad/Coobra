@@ -190,6 +190,37 @@ export interface CodShortfallItem {
   currency: Currency;
 }
 
+/**
+ * Why the viewer may not take a decision on a pending adjustment. UNKNOWN: it could not be
+ * determined (the answer is then "no"); the decision itself always checks again.
+ */
+export const ADJUSTMENT_REVIEW_REFUSALS = [
+  'OWN_REQUEST',
+  'OVER_LIMIT',
+  'CONFLICT_OF_INTEREST',
+  'UNKNOWN',
+] as const;
+export type AdjustmentReviewRefusal = (typeof ADJUSTMENT_REVIEW_REFUSALS)[number];
+
+export interface ReviewEligibility {
+  allowed: boolean;
+  /** Set when not allowed. */
+  reason: AdjustmentReviewRefusal | null;
+}
+
+/**
+ * The viewer's own eligibility, computed by the server with the rules the decision enforces.
+ * Advisory for the UI only: approve and reject re-check everything in their transaction.
+ * Approve and reject are separate because they are separate decisions (today their rules are
+ * the same).
+ */
+export interface AdjustmentReview {
+  approve: ReviewEligibility;
+  reject: ReviewEligibility;
+  /** Server time of the check. */
+  checkedAt: string;
+}
+
 export interface AdjustmentItem {
   id: string;
   type: 'MERCHANT_CREDIT' | 'MERCHANT_DEBIT';
@@ -206,6 +237,11 @@ export interface AdjustmentItem {
   sourceType: AdjustmentSourceType;
   sourceShipment: { id: string; trackingNumber: string } | null;
   sourceJournalEntryId: string | null;
+  /**
+   * Only for reviewers (finance roles) and only on PENDING_APPROVAL items; null otherwise.
+   * Missing (an older server) must be treated like UNKNOWN.
+   */
+  review?: AdjustmentReview | null;
 }
 
 export interface FinanceSettingItem {

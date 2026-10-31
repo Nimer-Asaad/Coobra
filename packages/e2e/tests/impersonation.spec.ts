@@ -20,10 +20,26 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-/** Opens the start dialog on the account's page and returns the app tab it opens. */
-async function startImpersonation(admin: Page, userId: string): Promise<Page> {
-  await admin.goto(`${URLS.admin}/users/${userId}`);
-  const start = admin.getByRole('button', { name: 'Act as this account' });
+/**
+ * Opens the start dialog, on the account's page or (with `fromListEmail`) from its row in the
+ * users list, and returns the app tab it opens.
+ */
+async function startImpersonation(
+  admin: Page,
+  userId: string,
+  fromListEmail?: string,
+): Promise<Page> {
+  let start;
+  if (fromListEmail) {
+    await admin.goto(`${URLS.admin}/users?q=${encodeURIComponent(fromListEmail)}`);
+    await expect(admin.getByText('1 users')).toBeVisible();
+    start = admin.getByRole('button', { name: /^Act as this account \(/ });
+    await expect(start).toBeEnabled();
+    await snap(admin, 'admin-users-list-row');
+  } else {
+    await admin.goto(`${URLS.admin}/users/${userId}`);
+    start = admin.getByRole('button', { name: 'Act as this account' });
+  }
   await expect(start).toBeEnabled();
   await start.click();
   const dialog = admin.getByRole('dialog');
@@ -195,7 +211,8 @@ test('admin acts as the driver: reasons, a confirmed failure, blocked delivery, 
   expect(assigned.ok(), await assigned.text()).toBe(true);
 
   const admin = await signInAdmin(browser, 'admin');
-  const tab = await startImpersonation(admin, accounts.driver.id);
+  // This time from the users list row (the same dialog and hand-off).
+  const tab = await startImpersonation(admin, accounts.driver.id, accounts.driver.email);
   await expectNoSecretsInTab(tab);
   await tab.goto(`${URLS.driver}/shipments/${shipmentId}`);
 
