@@ -5,23 +5,26 @@ Branch: `feature/phase4c-impersonation` (not merged into main). Design record:
 
 ## Phases
 
-| Phase                                        | State                          | Commit    |
-| -------------------------------------------- | ------------------------------ | --------- |
-| 4C.0/4C.1 Design, migration 14               | Approved                       | `1b7c0ab` |
-| 4C.2 ActingContext                           | Approved                       | `bfd1b21` |
-| 4C.3 Lifecycle and security gate             | Approved                       | `de7506b` |
-| 4C.4 Impersonated writes (off by default)    | Approved                       | `bef8bc9` |
-| 4C.5 Impersonation UI                        | **WIP, awaiting owner review** | `826a3b2` |
-| 4C.6 E2E journeys, security review, docs, PR | Not started                    | —         |
+| Phase                                        | State       | Commit    |
+| -------------------------------------------- | ----------- | --------- |
+| 4C.0/4C.1 Design, migration 14               | Approved    | `1b7c0ab` |
+| 4C.2 ActingContext                           | Approved    | `bfd1b21` |
+| 4C.3 Lifecycle and security gate             | Approved    | `de7506b` |
+| 4C.4 Impersonated writes (off by default)    | Approved    | `bef8bc9` |
+| 4C.5 Impersonation UI                        | Approved    | `9ac5a5e` |
+| 4C.6 E2E journeys, security review, docs, PR | Not started | —         |
 
 ## Pending
 
-1. Owner review of the 4C.5 report; on approval, reword the WIP commit (or add an approval
-   commit) and mark ADR §16 row 4C.5 as approved.
-2. Then Phase 4C.6 (needs owner approval to start).
+1. Phase 4C.6 (needs owner approval to start): release-readiness review, E2E journeys, docs, PR.
 
-Done on 2026-10-31 (ADR §22 follow-ups): the audit-log E2E race, "Act as" in the users list,
-and server-computed adjustment review eligibility.
+4C.5 was approved on 2026-10-31 at `9ac5a5e` (with the ADR §22 follow-ups: the audit-log E2E
+race, "Act as" in the users list, server-computed adjustment review eligibility). `826a3b2`
+keeps its WIP title: pushed commits are not rewritten.
+
+Known risks carried into 4C.6 (ADR §22): eligibility can be stale until the decision (which
+re-checks everything); a few queries per pending adjustment; shortfall and fee-correction
+approvals are not disabled in advance; the adjustment review screen has no E2E journey.
 
 ## Last test results (4C.5, 2026-10-31)
 

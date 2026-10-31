@@ -740,7 +740,7 @@ the URL` runs close to Vitest's 5-second limit under a fully parallel run and al
 | 4C.2  | `ActingContext` and request context everywhere; impersonation not yet possible            | Done; approved at `bfd1b21` (§18)                                            |
 | 4C.3  | Step-up, start, hand-off, exchange, end, outbox sender, revocation; every write forbidden | Done; approved at `de7506b` (§19, §20)                                       |
 | 4C.4  | Safeguarded writes in groups with R1–R3, the confirmation token and the ledger hard stop  | Done; approved at `bef8bc9` (§21)                                            |
-| 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | **Done; awaiting owner review** (§22)                                        |
+| 4C.5  | Admin console screens, hand-off, banner and countdown, notification email                 | Done; approved at `9ac5a5e` (§22)                                            |
 | 4C.6  | End-to-end journeys, security review, README and docs, pull request                       | Owner reviews the PR                                                         |
 
 ## 17. Phase 4C.1 validation record (2026-10-30)
@@ -938,7 +938,7 @@ disabled, R1 after the end, fee override, adjustment independence and provenance
 unchanged normal behaviour, with every ledger and money table unchanged. Unit tests cover the key
 ring and the signer (tamper, unknown key, expiry, rotation, canonical form).
 
-## 22. Phase 4C.5 record (2026-10-30)
+## 22. Phase 4C.5 record (2026-10-30; owner-approved 2026-10-31)
 
 **Admin console.** A merchant's or driver's page offers "Act as this account" to SUPER_ADMINs; it
 stays visible but disabled, with the reason, for staff, disabled accounts, an account another
@@ -1004,3 +1004,13 @@ The answer is advisory: approve and reject re-check everything inside their own 
 a refusal (403) or conflict (409) reloads the list. No migration; no write path or rule changed.
 The audit-log E2E waits for the filter reset before searching, and mobile E2E sign-ins wait out a
 429 once, like the admin sign-in.
+
+**Approval and remaining risks (2026-10-31).** The owner approved Phase 4C.5 at `9ac5a5e` (the
+commit `826a3b2` keeps its WIP title; pushed commits are not rewritten). Results at approval:
+typecheck, lint and Prettier clean; 259 unit and component tests; 205 API integration tests (17
+files, scratch database); isolated E2E 9/9, the audit-log test 5/5 repeated. Remaining risks, for
+the Phase 4C.6 review: review eligibility can be stale between the list and the decision (the
+decision decides, and a refusal reloads the list); eligibility costs a few queries per pending
+adjustment (fine at the current list limit of 200); shortfall and fee-correction approvals are
+not disabled in advance (the API's refusal is shown); the adjustment review screen is covered by
+component and integration tests, not by an E2E journey.
