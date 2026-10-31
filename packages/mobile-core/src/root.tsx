@@ -8,6 +8,9 @@ import { directionOf, type MeResponse } from '@coobra/shared';
 import { createApiClient, NetworkError, type ApiClient } from './api-client';
 import { ApiContext } from './api-context';
 import { MobileConfigContext, type MobileAppConfig } from './config';
+import { ImpersonationBanner } from './impersonation/banner';
+import { ImpersonationEndedScreen } from './impersonation/ended-screen';
+import { isHandoffTab, useImpersonationStore } from './impersonation/store';
 import { useLanguageStore } from './state/language-store';
 import { useSessionStore } from './state/session-store';
 import { usesCookieSessions } from './storage';
@@ -15,11 +18,52 @@ import { AppButton } from './ui/button';
 import { AppText } from './ui/text';
 import { colors, spacing } from './ui/theme';
 
-async function restoreSession(
+/** The impersonated account's own session (only ever through the impersonation cookie). */
+async function restoreImpersonation(
   api: ApiClient,
   clientApp: MobileAppConfig['clientApp'],
 ): Promise<void> {
   const store = useSessionStore.getState();
+  const impersonation = useImpersonationStore.getState();
+  try {
+    const me = await api.request<MeResponse>('/v1/auth/me');
+    if (!me.impersonation || me.impersonation.endedAt || me.session.clientApp !== clientApp) {
+      impersonation.end(me.impersonation?.endedReason ?? 'LOST');
+      store.setStatus('signedOut');
+      return;
+    }
+    impersonation.update(me.impersonation);
+    // The app's language stays local during an impersonation (preferences are not changed);
+    // without a choice in this browser, the account's language is used for this tab only.
+    if (!useLanguageStore.getState().language) {
+      useLanguageStore.getState().setForThisTab(me.user.language);
+    }
+    await store.signIn(me.user);
+  } catch (error) {
+    if (error instanceof NetworkError) store.setStatus('offline');
+    else {
+      impersonation.end('LOST');
+      store.setStatus('signedOut');
+    }
+  }
+}
+
+export async function restoreSession(
+  api: ApiClient,
+  clientApp: MobileAppConfig['clientApp'],
+): Promise<void> {
+  const store = useSessionStore.getState();
+  const { mode } = useImpersonationStore.getState();
+  // An ended impersonation tab, and the tab the console opened for a hand-off, never load the
+  // browser's real session.
+  if (mode === 'ended' || (mode === 'none' && isHandoffTab())) {
+    store.setStatus('signedOut');
+    return;
+  }
+  if (mode === 'active') {
+    await restoreImpersonation(api, clientApp);
+    return;
+  }
   const token = await store.loadToken();
   if (!usesCookieSessions && !token) {
     store.setStatus('signedOut');
@@ -51,6 +95,7 @@ export function CoobraRoot({ config, children }: { config: MobileAppConfig; chil
   const language = useLanguageStore((state) => state.language);
   const languageHydrated = useLanguageStore((state) => state.hydrated);
   const status = useSessionStore((state) => state.status);
+  const impersonationMode = useImpersonationStore((state) => state.mode);
 
   const api = useMemo(
     () =>
@@ -58,6 +103,8 @@ export function CoobraRoot({ config, children }: { config: MobileAppConfig; chil
         apiUrl: config.apiUrl,
         getToken: () => useSessionStore.getState().token,
         onUnauthenticated: () => void useSessionStore.getState().signOut(),
+        isImpersonating: () => useImpersonationStore.getState().mode === 'active',
+        onImpersonationLost: () => useImpersonationStore.getState().end('LOST'),
       }),
     [config.apiUrl],
   );
@@ -77,6 +124,13 @@ export function CoobraRoot({ config, children }: { config: MobileAppConfig; chil
     void restoreSession(api, config.clientApp);
   }, [api, config.clientApp]);
 
+  useEffect(() => {
+    if (impersonationMode !== 'ended') return;
+    // Nothing the impersonated account could see stays in memory.
+    queryClient.clear();
+    void useSessionStore.getState().signOut();
+  }, [impersonationMode, queryClient]);
+
   const ready = languageHydrated && status !== 'unknown';
 
   return (
@@ -94,6 +148,13 @@ export function CoobraRoot({ config, children }: { config: MobileAppConfig; chil
                   <View style={[styles.center, styles.offline]}>
                     <AppText>{i18n.t('errors.NETWORK')}</AppText>
                     <AppButton title={i18n.t('common.retry')} onPress={retry} />
+                  </View>
+                ) : impersonationMode === 'ended' ? (
+                  <ImpersonationEndedScreen />
+                ) : impersonationMode === 'active' && status === 'signedIn' ? (
+                  <View style={styles.root}>
+                    <ImpersonationBanner />
+                    <View style={styles.root}>{children}</View>
                   </View>
                 ) : (
                   children

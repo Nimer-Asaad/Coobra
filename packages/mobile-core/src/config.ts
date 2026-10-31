@@ -9,6 +9,11 @@ export interface MobileAppConfig {
   allowRegistration: boolean;
   /** i18n key of the app title, e.g. `apps.driver`. */
   appNameKey: string;
+  /**
+   * Exact origin of the admin console (EXPO_PUBLIC_ADMIN_WEB_URL): the only window allowed to
+   * hand this tab an impersonation. Without it the app never accepts one.
+   */
+  adminUrl?: string;
 }
 
 export const MobileConfigContext = createContext<MobileAppConfig | null>(null);

@@ -32,17 +32,31 @@ export class ApprovalService {
     return new Prisma.Decimal(setting?.value ?? DEFAULT_THRESHOLD);
   }
 
+  /** Why this approver may not decide, or null. The single source for assertCanApprove. */
+  async approvalRefusal(
+    db: Tx,
+    approver: Actor,
+    proposerId: string,
+    amount: Prisma.Decimal,
+  ): Promise<'FORBIDDEN' | 'OWN_REQUEST' | 'OVER_LIMIT' | null> {
+    if (!(FINANCE_ROLES as readonly UserRole[]).includes(approver.role)) return 'FORBIDDEN';
+    if (approver.id === proposerId) return 'OWN_REQUEST';
+    if (amount.greaterThan(await this.threshold(db)) && approver.role !== 'SUPER_ADMIN') {
+      return 'OVER_LIMIT';
+    }
+    return null;
+  }
+
   async assertCanApprove(
     db: Tx,
     approver: Actor,
     proposerId: string,
     amount: Prisma.Decimal,
   ): Promise<void> {
-    if (!(FINANCE_ROLES as readonly UserRole[]).includes(approver.role)) throw Errors.forbidden();
-    if (approver.id === proposerId) throw Errors.selfApprovalForbidden();
-    if (amount.greaterThan(await this.threshold(db)) && approver.role !== 'SUPER_ADMIN') {
-      throw Errors.approvalLimitExceeded();
-    }
+    const refusal = await this.approvalRefusal(db, approver, proposerId, amount);
+    if (refusal === 'FORBIDDEN') throw Errors.forbidden();
+    if (refusal === 'OWN_REQUEST') throw Errors.selfApprovalForbidden();
+    if (refusal === 'OVER_LIMIT') throw Errors.approvalLimitExceeded();
   }
 
   async settings(): Promise<FinanceSettingItem[]> {

@@ -9,6 +9,7 @@ import type { RequestMeta } from '../common/request.js';
 import { MailService } from '../mail/mail.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { UserWithProfile } from './user.mapper.js';
+import { redactForLog } from '../common/log-redaction.js';
 
 @Injectable()
 export class UsersService {
@@ -80,8 +81,7 @@ export class UsersService {
     } catch (error) {
       // The account exists; the admin can trigger "forgot password" for the user later.
       this.logger.error(
-        `Failed to send account setup email to user ${created.user.id}`,
-        error as Error,
+        `Failed to send account setup email to user ${created.user.id}: ${redactForLog(error)}`,
       );
     }
     return created.user;

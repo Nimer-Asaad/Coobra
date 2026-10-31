@@ -108,14 +108,40 @@ export type DecisionInput = z.infer<typeof decisionSchema>;
 export const rejectionSchema = z.object({ note: reasonTextSchema });
 export type RejectionInput = z.infer<typeof rejectionSchema>;
 
-export const adjustmentSchema = z.object({
-  type: z.enum(['MERCHANT_CREDIT', 'MERCHANT_DEBIT'], {
-    error: 'validation.finance.adjustmentType',
-  }),
-  merchantId: z.uuid({ error: 'validation.merchant.required' }),
-  amount: moneySchema(MAX_COD_AMOUNT),
-  reason: reasonTextSchema,
-});
+/** ADR 0003 §10.4: what an adjustment corrects (checked again by the database). */
+export const ADJUSTMENT_SOURCE_TYPES = [
+  'SHIPMENT_FEE',
+  'RETURN_CHARGE',
+  'COD_SHORTFALL',
+  'JOURNAL_ENTRY',
+  'UNLINKED',
+] as const;
+export type AdjustmentSourceType = (typeof ADJUSTMENT_SOURCE_TYPES)[number];
+
+export const adjustmentSchema = z
+  .object({
+    type: z.enum(['MERCHANT_CREDIT', 'MERCHANT_DEBIT'], {
+      error: 'validation.finance.adjustmentType',
+    }),
+    merchantId: z.uuid({ error: 'validation.merchant.required' }),
+    amount: moneySchema(MAX_COD_AMOUNT),
+    reason: reasonTextSchema,
+    // Optional provenance; without it the adjustment is UNLINKED (independent reviewer needed).
+    sourceType: z
+      .enum(ADJUSTMENT_SOURCE_TYPES, { error: 'validation.finance.adjustmentSource' })
+      .default('UNLINKED'),
+    sourceShipmentId: z.uuid({ error: 'validation.finance.adjustmentSource' }).optional(),
+    sourceJournalEntryId: z.uuid({ error: 'validation.finance.adjustmentSource' }).optional(),
+  })
+  .refine(
+    (input) =>
+      input.sourceType === 'UNLINKED'
+        ? !input.sourceShipmentId && !input.sourceJournalEntryId
+        : input.sourceType === 'JOURNAL_ENTRY'
+          ? Boolean(input.sourceJournalEntryId)
+          : Boolean(input.sourceShipmentId),
+    { path: ['sourceType'], error: 'validation.finance.adjustmentSource' },
+  );
 export type AdjustmentInput = z.infer<typeof adjustmentSchema>;
 
 export const feeCorrectionSchema = z.object({
@@ -164,6 +190,37 @@ export interface CodShortfallItem {
   currency: Currency;
 }
 
+/**
+ * Why the viewer may not take a decision on a pending adjustment. UNKNOWN: it could not be
+ * determined (the answer is then "no"); the decision itself always checks again.
+ */
+export const ADJUSTMENT_REVIEW_REFUSALS = [
+  'OWN_REQUEST',
+  'OVER_LIMIT',
+  'CONFLICT_OF_INTEREST',
+  'UNKNOWN',
+] as const;
+export type AdjustmentReviewRefusal = (typeof ADJUSTMENT_REVIEW_REFUSALS)[number];
+
+export interface ReviewEligibility {
+  allowed: boolean;
+  /** Set when not allowed. */
+  reason: AdjustmentReviewRefusal | null;
+}
+
+/**
+ * The viewer's own eligibility, computed by the server with the rules the decision enforces.
+ * Advisory for the UI only: approve and reject re-check everything in their transaction.
+ * Approve and reject are separate because they are separate decisions (today their rules are
+ * the same).
+ */
+export interface AdjustmentReview {
+  approve: ReviewEligibility;
+  reject: ReviewEligibility;
+  /** Server time of the check. */
+  checkedAt: string;
+}
+
 export interface AdjustmentItem {
   id: string;
   type: 'MERCHANT_CREDIT' | 'MERCHANT_DEBIT';
@@ -176,6 +233,15 @@ export interface AdjustmentItem {
   decidedAt: string | null;
   decisionNote: string | null;
   createdAt: string;
+  /** What the adjustment corrects (ADR 0003 §10.4); UNLINKED needs an independent reviewer. */
+  sourceType: AdjustmentSourceType;
+  sourceShipment: { id: string; trackingNumber: string } | null;
+  sourceJournalEntryId: string | null;
+  /**
+   * Only for reviewers (finance roles) and only on PENDING_APPROVAL items; null otherwise.
+   * Missing (an older server) must be treated like UNKNOWN.
+   */
+  review?: AdjustmentReview | null;
 }
 
 export interface FinanceSettingItem {

@@ -14,6 +14,8 @@ const ALLOWED_PREFIXES = [
   'v1/auth/reset-password',
   'v1/auth/verify-email',
   'v1/auth/resend-verification',
+  // SUPER_ADMIN password re-entry before an impersonation (the API checks role and session).
+  'v1/auth/reauthenticate',
   'v1/me/',
   'v1/admin/',
 ];

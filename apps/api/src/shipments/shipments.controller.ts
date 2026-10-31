@@ -22,6 +22,11 @@ import {
   type ShipmentListItem,
   type ShipmentSummary,
   type TransitionShipmentInput,
+  createConsequencesQuerySchema,
+  transitionConsequencesQuerySchema,
+  type ConsequencePreview,
+  type CreateConsequencesQuery,
+  type TransitionConsequencesQuery,
 } from '@coobra/shared';
 import { Auth, Meta, Roles } from '../common/decorators.js';
 import type { RequestAuth, RequestMeta } from '../common/request.js';
@@ -46,7 +51,7 @@ export class AdminShipmentsController {
     @Auth() auth: RequestAuth,
     @Query(listQuery) query: ListShipmentsQuery,
   ): Promise<Paginated<ShipmentListItem>> {
-    return this.shipments.list(auth.user, query);
+    return this.shipments.list(auth.acting, query);
   }
 
   @Get('shipments/summary')
@@ -56,7 +61,7 @@ export class AdminShipmentsController {
 
   @Get('shipments/:id')
   get(@Auth() auth: RequestAuth, @Param('id') id: string): Promise<ShipmentDetails> {
-    return this.shipments.get(auth.user, id);
+    return this.shipments.get(auth.acting, id);
   }
 
   @Roles(...SHIPMENT_MANAGER_ROLES)
@@ -67,7 +72,7 @@ export class AdminShipmentsController {
     @Body(new ZodValidationPipe(adminCreateShipmentSchema)) body: AdminCreateShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.createForMerchantByStaff(auth.user, body, meta);
+    return this.shipments.createForMerchantByStaff(auth.acting, body, meta);
   }
 
   @Roles(...SHIPMENT_MANAGER_ROLES)
@@ -103,7 +108,7 @@ export class AdminShipmentsController {
     @Body(transitionBody) body: TransitionShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.transition(auth.user, id, body, meta);
+    return this.shipments.transition(auth.acting, id, body, meta);
   }
 
   @Get('merchants')
@@ -127,17 +132,28 @@ export class AdminShipmentsController {
 export class MerchantShipmentsController {
   constructor(private readonly shipments: ShipmentsService) {}
 
+  /** Impersonation only (ADR 0003 R2): the charges a transition can lead to, signed. */
+  @Get(':id/consequences')
+  consequences(
+    @Auth() auth: RequestAuth,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(transitionConsequencesQuerySchema))
+    query: TransitionConsequencesQuery,
+  ): Promise<ConsequencePreview> {
+    return this.shipments.previewTransition(auth.acting, id, query.toStatus);
+  }
+
   @Get()
   list(
     @Auth() auth: RequestAuth,
     @Query(listQuery) query: ListShipmentsQuery,
   ): Promise<Paginated<ShipmentListItem>> {
-    return this.shipments.list(auth.user, query);
+    return this.shipments.list(auth.acting, query);
   }
 
   @Get(':id')
   get(@Auth() auth: RequestAuth, @Param('id') id: string): Promise<ShipmentDetails> {
-    return this.shipments.get(auth.user, id);
+    return this.shipments.get(auth.acting, id);
   }
 
   @Throttle(CREATE_LIMIT)
@@ -147,7 +163,7 @@ export class MerchantShipmentsController {
     @Body(new ZodValidationPipe(createShipmentSchema)) body: CreateShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.createForMerchant(auth.user, body, meta);
+    return this.shipments.createForMerchant(auth.acting, body, meta);
   }
 
   @HttpCode(200)
@@ -158,7 +174,7 @@ export class MerchantShipmentsController {
     @Body(transitionBody) body: TransitionShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.transition(auth.user, id, body, meta);
+    return this.shipments.transition(auth.acting, id, body, meta);
   }
 }
 
@@ -168,17 +184,28 @@ export class MerchantShipmentsController {
 export class DriverShipmentsController {
   constructor(private readonly shipments: ShipmentsService) {}
 
+  /** Impersonation only (ADR 0003 R2): the charges a transition can lead to, signed. */
+  @Get(':id/consequences')
+  consequences(
+    @Auth() auth: RequestAuth,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(transitionConsequencesQuerySchema))
+    query: TransitionConsequencesQuery,
+  ): Promise<ConsequencePreview> {
+    return this.shipments.previewTransition(auth.acting, id, query.toStatus);
+  }
+
   @Get()
   list(
     @Auth() auth: RequestAuth,
     @Query(listQuery) query: ListShipmentsQuery,
   ): Promise<Paginated<ShipmentListItem>> {
-    return this.shipments.list(auth.user, query);
+    return this.shipments.list(auth.acting, query);
   }
 
   @Get(':id')
   get(@Auth() auth: RequestAuth, @Param('id') id: string): Promise<ShipmentDetails> {
-    return this.shipments.get(auth.user, id);
+    return this.shipments.get(auth.acting, id);
   }
 
   @HttpCode(200)
@@ -189,6 +216,21 @@ export class DriverShipmentsController {
     @Body(transitionBody) body: TransitionShipmentInput,
     @Meta() meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    return this.shipments.transition(auth.user, id, body, meta);
+    return this.shipments.transition(auth.acting, id, body, meta);
+  }
+}
+
+/** Impersonation only (ADR 0003 R2): the charges a new shipment fixes, signed. */
+@Roles('MERCHANT')
+@Controller('merchant')
+export class MerchantConsequencesController {
+  constructor(private readonly shipments: ShipmentsService) {}
+
+  @Get('shipment-consequences')
+  consequences(
+    @Auth() auth: RequestAuth,
+    @Query(new ZodValidationPipe(createConsequencesQuerySchema)) query: CreateConsequencesQuery,
+  ): Promise<ConsequencePreview> {
+    return this.shipments.previewCreate(auth.acting, query);
   }
 }

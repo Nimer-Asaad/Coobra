@@ -10,7 +10,9 @@ import {
   type UserRole,
 } from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
+import { assertNoImpersonationConflict } from '../impersonation/write-guards.js';
 import { Errors } from '../common/app-exception.js';
+import type { ActingContext } from '../common/acting-context.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ApprovalService } from './approval.service.js';
@@ -91,10 +93,13 @@ export class CodService {
   async onDelivered(
     tx: Tx,
     shipment: Shipment,
-    driver: Actor,
+    acting: ActingContext,
     cod: CodConfirmationInput,
     now: Date,
   ): Promise<void> {
+    // The accountable driver is the principal; the person recorded as acting is the actor.
+    const driver = acting.principal;
+    const recordedBy = acting.actor;
     const expected = shipment.codAmount;
     const amount = decimal(cod.amount);
     let collected = ZERO;
@@ -119,14 +124,14 @@ export class CodService {
       },
     });
     if (collected.greaterThan(0)) {
-      await this.postCollection(tx, shipment, driver.id, collection.id, collected);
+      await this.postCollection(tx, shipment, driver.id, recordedBy.id, collection.id, collected);
     }
     if (shipment.deliveryFee?.greaterThan(0)) {
       await this.ledger.post(tx, {
         kind: 'DELIVERY_FEE',
         sourceType: 'shipment',
         sourceId: shipment.id,
-        createdById: driver.id,
+        createdById: recordedBy.id,
         description: `Delivery fee ${shipment.trackingNumber}`,
         lines: [
           debit(accounts.merchantBalance(shipment.merchantId), shipment.deliveryFee, shipment.id),
@@ -159,7 +164,10 @@ export class CodService {
   private postCollection(
     tx: Tx,
     shipment: Shipment,
+    /** The driver whose custody receives the cash (accountable). */
     driverId: string,
+    /** The person recorded as having acted (the real actor). */
+    createdById: string,
     collectionId: string,
     amount: Prisma.Decimal,
   ) {
@@ -167,7 +175,7 @@ export class CodService {
       kind: 'COD_COLLECTION',
       sourceType: 'cod_collection',
       sourceId: collectionId,
-      createdById: driverId,
+      createdById,
       description: `COD ${shipment.trackingNumber}`,
       lines: [
         debit(accounts.driverCustody(driverId), amount, shipment.id),
@@ -210,7 +218,7 @@ export class CodService {
             note: input.note ?? null,
           },
         });
-        await this.postCollection(tx, shipment, driver.id, collection.id, amount);
+        await this.postCollection(tx, shipment, driver.id, driver.id, collection.id, amount);
         const fullyPaid = amount.equals(outstanding);
         await tx.shipment.update({
           where: { id: shipmentId },
@@ -308,6 +316,8 @@ export class CodService {
       throw Errors.forbidden();
     const amount = await this.prisma.client.$transaction(async (tx) => {
       const shortfall = await this.loadShortfall(tx, id);
+      // R1 (ADR 0003 §10.2), also after the impersonation ended.
+      await assertNoImpersonationConflict(tx, shortfall.shipmentId, actor.id);
       if (shortfall.status !== 'OPEN')
         throw Errors.invalidState('Only open shortfalls can be proposed');
       const outstanding = await this.outstanding(tx, shortfall);
@@ -345,6 +355,7 @@ export class CodService {
     return this.idempotency.run(actor.id, `shortfall-approve:${id}`, key, { note }, async () => {
       const resolution = await this.prisma.client.$transaction(async (tx) => {
         const shortfall = await this.loadShortfall(tx, id);
+        await assertNoImpersonationConflict(tx, shortfall.shipmentId, actor.id);
         if (
           shortfall.status !== 'PENDING_APPROVAL' ||
           !shortfall.proposedAmount ||
@@ -410,6 +421,7 @@ export class CodService {
   async reject(actor: Actor, id: string, note: string, meta: RequestMeta) {
     await this.prisma.client.$transaction(async (tx) => {
       const shortfall = await this.loadShortfall(tx, id);
+      await assertNoImpersonationConflict(tx, shortfall.shipmentId, actor.id);
       if (shortfall.status !== 'PENDING_APPROVAL') {
         throw Errors.invalidState('This shortfall has no proposal waiting for approval');
       }

@@ -144,8 +144,8 @@ export class AdminFinanceController {
   }
 
   @Get('adjustments')
-  listAdjustments() {
-    return this.adjustments.listAdjustments();
+  listAdjustments(@Auth() auth: RequestAuth) {
+    return this.adjustments.listAdjustments(auth.user);
   }
 
   @Roles(...FINANCE_ROLES)

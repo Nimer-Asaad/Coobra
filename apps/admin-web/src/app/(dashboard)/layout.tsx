@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { LogoutButton } from '@/components/dashboard/logout-button';
+import { ActiveImpersonationBar } from '@/components/impersonation/active-impersonation-bar';
 import { navItemsFor } from '@/components/dashboard/nav';
 import { LanguageSwitch } from '@/components/language-switch';
 import { getCurrentSession } from '@/lib/api-server';
@@ -38,6 +39,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
           </div>
         </div>
       </header>
+      {session.user.role === 'SUPER_ADMIN' ? (
+        <ActiveImpersonationBar currentUserId={session.user.id} />
+      ) : null}
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
     </div>
   );

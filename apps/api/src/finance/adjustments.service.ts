@@ -1,7 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@coobra/database';
-import type { AdjustmentInput, AdjustmentItem, FeeCorrectionInput, UserRole } from '@coobra/shared';
+import {
+  FINANCE_ROLES,
+  type AdjustmentInput,
+  type AdjustmentItem,
+  type AdjustmentReview,
+  type FeeCorrectionInput,
+  type ReviewEligibility,
+  type UserRole,
+} from '@coobra/shared';
 import { AuditService } from '../audit/audit.service.js';
+import {
+  adjustmentReviewerConflict,
+  assertIndependentAdjustmentReviewer,
+  assertNoImpersonationConflict,
+} from '../impersonation/write-guards.js';
 import { Errors } from '../common/app-exception.js';
 import type { RequestMeta } from '../common/request.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -11,6 +24,9 @@ import { accounts, credit, debit, decimal, LedgerService } from './ledger.servic
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; role: UserRole };
+type AdjustmentRow = Prisma.FinancialAdjustmentGetPayload<{ include: typeof adjustmentInclude }>;
+
+const UNKNOWN: ReviewEligibility = { allowed: false, reason: 'UNKNOWN' };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (value: Prisma.Decimal) => value.toFixed(2);
@@ -21,6 +37,7 @@ const adjustmentInclude = {
   },
   requestedBy: { select: { id: true, fullName: true } },
   decidedBy: { select: { id: true, fullName: true } },
+  sourceShipment: { select: { id: true, trackingNumber: true } },
 } as const satisfies Prisma.FinancialAdjustmentInclude;
 
 /**
@@ -30,6 +47,8 @@ const adjustmentInclude = {
  */
 @Injectable()
 export class AdjustmentsService {
+  private readonly logger = new Logger(AdjustmentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
@@ -51,6 +70,8 @@ export class AdjustmentsService {
     if (!UUID_PATTERN.test(shipmentId)) throw Errors.notFound();
     const override = await this.prisma.client.$transaction(async (tx) => {
       const shipment = await tx.shipment.findUnique({ where: { id: shipmentId } });
+      // R1 (ADR 0003 §10.2): never correct a fee of a shipment you were involved in.
+      if (shipment) await assertNoImpersonationConflict(tx, shipmentId, actor.id);
       if (!shipment) throw Errors.notFound();
       if (shipment.status !== 'DELIVERED') {
         throw Errors.invalidState(
@@ -127,6 +148,7 @@ export class AdjustmentsService {
           const override = await tx.shipmentFeeOverride.findUniqueOrThrow({
             where: { id: overrideId },
           });
+          await assertNoImpersonationConflict(tx, override.shipmentId, actor.id);
           if (override.phase !== 'POST_DELIVERY' || override.status !== 'PENDING_APPROVAL') {
             throw Errors.invalidState('This fee correction is not waiting for approval');
           }
@@ -241,16 +263,66 @@ export class AdjustmentsService {
       decidedAt: row.decidedAt?.toISOString() ?? null,
       decisionNote: row.decisionNote,
       createdAt: row.createdAt.toISOString(),
+      sourceType: row.sourceType,
+      sourceShipment: row.sourceShipment,
+      sourceJournalEntryId: row.sourceJournalEntryId,
     };
   }
 
-  async listAdjustments() {
+  async listAdjustments(actor: Actor): Promise<AdjustmentItem[]> {
     const rows = await this.prisma.client.financialAdjustment.findMany({
       include: adjustmentInclude,
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    return rows.map((row) => this.toItem(row));
+    const reviews = await this.reviews(
+      actor,
+      rows.filter((row) => row.status === 'PENDING_APPROVAL'),
+    );
+    return rows.map((row) => ({ ...this.toItem(row), review: reviews.get(row.id) ?? null }));
+  }
+
+  /**
+   * The viewer's eligibility for each pending adjustment, for the review screen only. Reviewers
+   * (finance roles) only; others get none. It runs the checks decideAdjustment runs, in the
+   * same order, in one read-only transaction. It fails closed: if the checks cannot run, every
+   * item is UNKNOWN (not allowed). decideAdjustment checks everything again in its own
+   * transaction, so this answer never authorizes anything.
+   */
+  private async reviews(actor: Actor, rows: AdjustmentRow[]) {
+    const result = new Map<string, AdjustmentReview>();
+    if (!(FINANCE_ROLES as readonly UserRole[]).includes(actor.role) || rows.length === 0) {
+      return result;
+    }
+    try {
+      await this.prisma.client.$transaction(async (tx) => {
+        await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+        const checkedAt = new Date().toISOString();
+        for (const row of rows) {
+          // decideAdjustment applies the same checks to approve and reject today, so both get
+          // the same answer; the contract keeps them apart in case the rules diverge.
+          const eligibility = await this.eligibility(tx, actor, row);
+          result.set(row.id, { approve: eligibility, reject: eligibility, checkedAt });
+        }
+      });
+    } catch (error) {
+      this.logger.warn(`Adjustment review eligibility unavailable: ${String(error)}`);
+      const checkedAt = new Date().toISOString();
+      for (const row of rows) result.set(row.id, { approve: UNKNOWN, reject: UNKNOWN, checkedAt });
+    }
+    return result;
+  }
+
+  private async eligibility(tx: Tx, actor: Actor, row: AdjustmentRow): Promise<ReviewEligibility> {
+    const refusal = await this.approvals.approvalRefusal(tx, actor, row.requestedById, row.amount);
+    if (refusal === 'OWN_REQUEST' || refusal === 'OVER_LIMIT') {
+      return { allowed: false, reason: refusal };
+    }
+    if (refusal !== null) return UNKNOWN;
+    if (await adjustmentReviewerConflict(tx, row, actor.id)) {
+      return { allowed: false, reason: 'CONFLICT_OF_INTEREST' };
+    }
+    return { allowed: true, reason: null };
   }
 
   async requestAdjustment(actor: Actor, input: AdjustmentInput, meta: RequestMeta) {
@@ -258,10 +330,18 @@ export class AdjustmentsService {
       where: { id: input.merchantId, role: 'MERCHANT' },
     });
     if (!merchant) throw Errors.shipmentMerchantInvalid();
-    const row = await this.prisma.client.financialAdjustment.create({
-      data: { ...input, requestedById: actor.id },
-      include: adjustmentInclude,
-    });
+    const row = await this.prisma.client.financialAdjustment
+      .create({
+        data: { ...input, requestedById: actor.id },
+        include: adjustmentInclude,
+      })
+      .catch((error: unknown) => {
+        // The database checks the provenance is this merchant's (ADR 0003 §10.4).
+        if (/financial_adjustments_(provenance|source)_check/.test(String(error))) {
+          throw Errors.validation({ sourceType: 'validation.finance.adjustmentSource' });
+        }
+        throw error;
+      });
     await this.audit.record({
       action: 'ADJUSTMENT_REQUESTED',
       actorUserId: actor.id,
@@ -299,6 +379,9 @@ export class AdjustmentsService {
           adjustment.requestedById,
           adjustment.amount,
         );
+        // ADR 0003 §10.4 (approve and reject): never decide what you were involved in; without
+        // verified provenance, only a reviewer who never impersonated the merchant may decide.
+        await assertIndependentAdjustmentReviewer(tx, adjustment, actor.id);
         let journalEntryId: string | null = null;
         if (approve) {
           const merchant = accounts.merchantBalance(adjustment.merchantId);

@@ -1,15 +1,18 @@
 import { randomInt } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, type User } from '@coobra/database';
 import {
   ASSIGNABLE_STATUSES,
   DRIVER_ACTIVE_STATUSES,
   findShipmentTransition,
+  impersonationTransitionPolicy,
   normalizePhone,
   SHIPMENT_STATUSES,
   SHIPMENT_VIEWER_ROLES,
   shipmentActorForRole,
   type AdminCreateShipmentInput,
+  type CreateConsequencesQuery,
+  type ImpersonationTargetRole,
   type CreateShipmentInput,
   type DriverOption,
   type ListShipmentsQuery,
@@ -25,6 +28,14 @@ import {
 import { AuditService } from '../audit/audit.service.js';
 import { isUniqueViolation } from '../auth/auth.service.js';
 import { AppException, Errors } from '../common/app-exception.js';
+import type { ActingContext } from '../common/acting-context.js';
+import { CLOCK, type Clock } from '../common/clock.js';
+import { APP_CONFIG, type AppConfig } from '../config/env.js';
+import {
+  assertImpersonationActiveIn,
+  assertNoImpersonationConflict,
+} from '../impersonation/write-guards.js';
+import { ConsequenceService } from './consequences.service.js';
 import type { RequestMeta } from '../common/request.js';
 import { CodService } from '../finance/cod.service.js';
 import { ReturnsService } from '../finance/returns.service.js';
@@ -64,7 +75,17 @@ export class ShipmentsService {
     private readonly zones: ZonesService,
     private readonly cod: CodService,
     private readonly returns: ReturnsService,
+    private readonly consequences: ConsequenceService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {}
+
+  /** Inside every impersonated write transaction (ADR 0003 §10, Phase 4C.4). */
+  private async guardImpersonatedWrite(tx: Tx, acting: ActingContext): Promise<void> {
+    if (!acting.impersonation) return;
+    if (!this.config.impersonationWrites.enabled) throw Errors.impersonationForbiddenAction();
+    await assertImpersonationActiveIn(tx, acting, () => this.clock.now());
+  }
 
   /** Maps a shipment with zone labels (paths) resolved. */
   private async toDetails(db: Tx, shipment: Parameters<typeof toShipmentDetails>[0]) {
@@ -88,11 +109,15 @@ export class ShipmentsService {
     throw Errors.forbidden();
   }
 
-  async list(actor: Actor, query: ListShipmentsQuery): Promise<Paginated<ShipmentListItem>> {
-    const filters: Prisma.ShipmentWhereInput[] = [this.scopeFor(actor)];
+  async list(
+    acting: ActingContext,
+    query: ListShipmentsQuery,
+  ): Promise<Paginated<ShipmentListItem>> {
+    const principal = acting.principal;
+    const filters: Prisma.ShipmentWhereInput[] = [this.scopeFor(principal)];
     if (query.status) filters.push({ status: query.status });
     if (query.governorate) filters.push({ governorate: query.governorate });
-    if (actor.role !== 'MERCHANT' && actor.role !== 'DRIVER') {
+    if (principal.role !== 'MERCHANT' && principal.role !== 'DRIVER') {
       if (query.merchantId) filters.push({ merchantId: query.merchantId });
       if (query.driverId) filters.push({ driverId: query.driverId });
     }
@@ -154,9 +179,9 @@ export class ShipmentsService {
     return { counts, total };
   }
 
-  async get(actor: Actor, id: string): Promise<ShipmentDetails> {
+  async get(acting: ActingContext, id: string): Promise<ShipmentDetails> {
     const db = this.prisma.client;
-    return this.toDetails(db, await this.findScoped(db, actor, id));
+    return this.toDetails(db, await this.findScoped(db, acting.principal, id));
   }
 
   private async findScoped(db: Tx, actor: Actor, id: string) {
@@ -170,17 +195,87 @@ export class ShipmentsService {
   }
 
   /** A merchant creates a shipment for their own account, priced by the server. */
-  createForMerchant(merchant: Actor, input: CreateShipmentInput, meta: RequestMeta) {
-    return this.create(merchant, merchant.id, input, meta, async (tx, originZoneId) => {
+  createForMerchant(acting: ActingContext, input: CreateShipmentInput, meta: RequestMeta) {
+    const merchantId = acting.principal.id;
+    const impersonationId = acting.impersonation?.id ?? null;
+    return this.create(acting, merchantId, input, meta, async (tx, originZoneId) => {
+      await this.guardImpersonatedWrite(tx, acting);
       const route = {
-        merchantId: merchant.id,
+        merchantId,
         originZoneId,
         destinationZoneId: input.destinationZoneId,
       };
+      // A quote is usable only in the context that created it (impersonation or not).
       const priced = input.quoteId
-        ? await this.pricing.consumeQuote(tx, { ...route, quoteId: input.quoteId })
+        ? await this.pricing.consumeQuote(tx, { ...route, quoteId: input.quoteId, impersonationId })
         : await this.pricing.price(tx, route);
+      if (acting.impersonation) {
+        // R2: the confirmed charges must equal the ones this write is about to fix.
+        this.consequences.verify(
+          acting,
+          input.confirmationToken,
+          this.consequences.forCreate({
+            merchantId,
+            originZoneId,
+            destinationZoneId: input.destinationZoneId,
+            codAmount: input.codAmount,
+            quoteId: input.quoteId ?? null,
+            priced,
+            currency: 'ILS',
+          }),
+        );
+      }
       return { priced, fee: priced.fee.toFixed(2), manual: null };
+    });
+  }
+
+  /** ADR 0003 R2 preview of an impersonated transition (writes nothing). */
+  async previewTransition(acting: ActingContext, id: string, toStatus: ShipmentStatus) {
+    if (!acting.impersonation) throw Errors.forbidden();
+    if (!this.config.impersonationWrites.enabled) throw Errors.impersonationForbiddenAction();
+    return this.prisma.client.$transaction(async (tx) => {
+      const current = await this.findScoped(tx, acting.principal, id);
+      if (!findShipmentTransition(current.status, toStatus)) {
+        throw Errors.shipmentInvalidTransition();
+      }
+      const policy = impersonationTransitionPolicy(
+        acting.principal.role as ImpersonationTargetRole,
+        current.status,
+        toStatus,
+      );
+      if (policy.access !== 'SAFEGUARDED') throw Errors.impersonationForbiddenAction();
+      return this.consequences.preview(
+        acting,
+        await this.consequences.forTransition(tx, current, toStatus),
+      );
+    });
+  }
+
+  /** ADR 0003 R2 preview of an impersonated create (writes nothing; quote not claimed). */
+  async previewCreate(acting: ActingContext, query: CreateConsequencesQuery) {
+    if (!acting.impersonation) throw Errors.forbidden();
+    if (!this.config.impersonationWrites.enabled) throw Errors.impersonationForbiddenAction();
+    const merchantId = acting.principal.id;
+    return this.prisma.client.$transaction(async (tx) => {
+      const originZoneId = await this.pricing.resolveOrigin(tx, merchantId, undefined);
+      const route = { merchantId, originZoneId, destinationZoneId: query.destinationZoneId };
+      const priced = query.quoteId
+        ? await this.pricing.inspectQuote(tx, {
+            ...route,
+            quoteId: query.quoteId,
+            impersonationId: acting.impersonation!.id,
+          })
+        : await this.pricing.price(tx, route);
+      return this.consequences.preview(
+        acting,
+        this.consequences.forCreate({
+          ...route,
+          codAmount: query.codAmount,
+          quoteId: query.quoteId ?? null,
+          priced,
+          currency: 'ILS',
+        }),
+      );
     });
   }
 
@@ -188,14 +283,18 @@ export class ShipmentsService {
    * Staff create a shipment on behalf of an existing, active merchant (recorded as staff).
    * The fee is priced automatically; a manual fee is recorded as an override with its reason.
    */
-  async createForMerchantByStaff(staff: Actor, input: AdminCreateShipmentInput, meta: RequestMeta) {
+  async createForMerchantByStaff(
+    acting: ActingContext,
+    input: AdminCreateShipmentInput,
+    meta: RequestMeta,
+  ) {
     const merchant = await this.prisma.client.user.findFirst({
       where: { id: input.merchantId, role: 'MERCHANT', status: 'ACTIVE' },
       select: { id: true },
     });
     if (!merchant) throw Errors.shipmentMerchantInvalid();
     const { merchantId, manualFee, manualFeeReason, ...fields } = input;
-    return this.create(staff, merchantId, fields, meta, async (tx, originZoneId) => {
+    return this.create(acting, merchantId, fields, meta, async (tx, originZoneId) => {
       const route = { merchantId, originZoneId, destinationZoneId: input.destinationZoneId };
       let priced: PriceResult | null = null;
       try {
@@ -220,8 +319,9 @@ export class ShipmentsService {
     });
   }
 
+  /** `acting.actor` is recorded as the creator; the result is read back as the principal sees it. */
   private async create(
-    creator: Actor,
+    acting: ActingContext,
     merchantId: string,
     // originZoneId comes only from staff; merchant input never carries it (schema strips it).
     input: Omit<CreateShipmentInput, 'quoteId'> & { quoteId?: string; originZoneId?: string },
@@ -235,6 +335,20 @@ export class ShipmentsService {
       manual: { reason: string } | null;
     }>,
   ): Promise<ShipmentDetails> {
+    const creator = acting.actor;
+    const createdAudit = (shipment: ShipmentDetails) => ({
+      action: 'SHIPMENT_CREATED' as const,
+      actorUserId: creator.id,
+      targetUserId: merchantId,
+      meta,
+      metadata: {
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        onBehalfOfMerchant: creator.id !== merchantId,
+        deliveryFee: shipment.deliveryFee,
+        pricingSource: shipment.pricing?.source ?? null,
+      },
+    });
     for (let attempt = 1; ; attempt++) {
       try {
         const shipment = await this.prisma.client.$transaction(async (tx) => {
@@ -266,6 +380,8 @@ export class ShipmentsService {
               deliveryFee: fee,
               originZoneId,
               destinationZoneId: input.destinationZoneId,
+              // The impersonation; the database ties it to createdById and merchantId.
+              ...(acting.impersonation ? { createdImpersonationId: acting.impersonation.id } : {}),
             },
           });
           // Immutable snapshot: later rule changes never alter this shipment's price.
@@ -314,23 +430,20 @@ export class ShipmentsService {
               toStatus: 'CREATED',
               actorUserId: creator.id,
               actorRole: creator.role,
+              ...(acting.impersonation ? { impersonationId: acting.impersonation.id } : {}),
             },
           });
-          return this.toDetails(tx, await this.findScoped(tx, creator, created.id));
+          const details = await this.toDetails(
+            tx,
+            await this.findScoped(tx, acting.principal, created.id),
+          );
+          if (acting.impersonation) {
+            // An impersonated creation and its audit entry commit together (or not at all).
+            await this.audit.recordIn(tx, createdAudit(details));
+          }
+          return details;
         });
-        await this.audit.record({
-          action: 'SHIPMENT_CREATED',
-          actorUserId: creator.id,
-          targetUserId: merchantId,
-          meta,
-          metadata: {
-            shipmentId: shipment.id,
-            trackingNumber: shipment.trackingNumber,
-            onBehalfOfMerchant: creator.id !== merchantId,
-            deliveryFee: shipment.deliveryFee,
-            pricingSource: shipment.pricing?.source ?? null,
-          },
-        });
+        if (!acting.impersonation) await this.audit.record(createdAudit(shipment));
         return shipment;
       } catch (error) {
         // Tracking number collision: retry with a new random number.
@@ -431,6 +544,8 @@ export class ShipmentsService {
       if (current.status === 'RETURN_APPROVED' && current.driverId === (input.driverId ?? null)) {
         return null;
       }
+      // R1: never approve a return you were involved in while impersonating (also after it ended).
+      await assertNoImpersonationConflict(tx, id, staff.id);
       await this.applyUpdate(tx, current, {
         status: 'RETURN_APPROVED',
         driverId: input.driverId ?? null,
@@ -471,21 +586,70 @@ export class ShipmentsService {
    * appends history and records COD in one transaction guarded by the version column.
    */
   async transition(
-    actor: Actor,
+    acting: ActingContext,
     id: string,
     input: TransitionShipmentInput,
     meta: RequestMeta,
   ): Promise<ShipmentDetails> {
-    const role = shipmentActorForRole(actor.role);
+    const { actor, principal } = acting;
+    const role = shipmentActorForRole(principal.role);
     if (!role) throw Errors.forbidden();
 
+    const transitionAudit = (
+      s: { merchantId: string; trackingNumber: string },
+      from: ShipmentStatus,
+    ) => ({
+      action:
+        input.toStatus === 'CANCELLED'
+          ? ('SHIPMENT_CANCELLED' as const)
+          : ('SHIPMENT_STATUS_CHANGED' as const),
+      actorUserId: actor.id,
+      targetUserId: s.merchantId,
+      meta,
+      metadata: {
+        shipmentId: id,
+        trackingNumber: s.trackingNumber,
+        fromStatus: from,
+        toStatus: input.toStatus,
+      },
+    });
+
     const { shipment, fromStatus } = await this.prisma.client.$transaction(async (tx) => {
-      const current = await this.findScoped(tx, actor, id);
+      // Lock order: users -> impersonation (guard) -> this shipment -> its return record.
+      await this.guardImpersonatedWrite(tx, acting);
+      if (acting.impersonation && UUID_PATTERN.test(id)) {
+        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${id}::uuid FOR UPDATE`;
+      }
+      const current = await this.findScoped(tx, principal, id);
       const rule = findShipmentTransition(current.status, input.toStatus);
       if (!rule) throw Errors.shipmentInvalidTransition();
       if (!rule.actors.includes(role)) throw Errors.forbidden();
+      if (acting.impersonation) {
+        // ADR 0003 §4: per transition, fail closed (DELIVERED and driver RETURNED are forbidden).
+        const policy = impersonationTransitionPolicy(
+          principal.role as ImpersonationTargetRole,
+          current.status,
+          input.toStatus,
+        );
+        if (policy.access !== 'SAFEGUARDED') throw Errors.impersonationForbiddenAction();
+        if (policy.requiresReason && !input.reason) {
+          throw Errors.validation({ reason: 'validation.reason.required' });
+        }
+        if (policy.consequences.length > 0) {
+          await tx.$queryRaw`SELECT id FROM return_records WHERE shipment_id = ${id}::uuid FOR SHARE`;
+          this.consequences.verify(
+            acting,
+            input.confirmationToken,
+            await this.consequences.forTransition(tx, current, input.toStatus),
+          );
+        }
+      }
       if (rule.requiresReason && !input.reason) {
         throw Errors.validation({ reason: 'validation.reason.required' });
+      }
+      // R1: staff closing a return posts its charges; never by someone involved while impersonating.
+      if (role === 'STAFF' && input.toStatus === 'RETURNED') {
+        await assertNoImpersonationConflict(tx, id, actor.id);
       }
 
       const now = new Date();
@@ -527,34 +691,34 @@ export class ShipmentsService {
           actorUserId: actor.id,
           actorRole: actor.role,
           note: input.reason ?? null,
+          ...(acting.impersonation ? { impersonationId: acting.impersonation.id } : {}),
         },
       });
       if (rule.requiresCodConfirmation && input.cod) {
         // Validates the confirmation, records the collection and posts COD and the fee.
-        await this.cod.onDelivered(tx, current, actor, input.cod, now);
+        await this.cod.onDelivered(tx, current, acting, input.cod, now);
       }
       if (input.toStatus === 'RETURN_REQUESTED') {
-        await this.returns.onRequested(tx, current, actor, input.reason ?? null);
+        await this.returns.onRequested(
+          tx,
+          current,
+          actor,
+          input.reason ?? null,
+          acting.impersonation?.id ?? null,
+        );
       }
       if (input.toStatus === 'RETURNED') {
         // Posts the return fee if decided; never refunds or reverses anything automatically.
         await this.returns.onReturned(tx, current, actor, now);
       }
-      return { shipment: await this.findScoped(tx, actor, id), fromStatus: current.status };
+      if (acting.impersonation) {
+        // An impersonated change and its audit entry commit together (or not at all).
+        await this.audit.recordIn(tx, transitionAudit(current, current.status));
+      }
+      return { shipment: await this.findScoped(tx, principal, id), fromStatus: current.status };
     });
 
-    await this.audit.record({
-      action: input.toStatus === 'CANCELLED' ? 'SHIPMENT_CANCELLED' : 'SHIPMENT_STATUS_CHANGED',
-      actorUserId: actor.id,
-      targetUserId: shipment.merchantId,
-      meta,
-      metadata: {
-        shipmentId: id,
-        trackingNumber: shipment.trackingNumber,
-        fromStatus,
-        toStatus: input.toStatus,
-      },
-    });
+    if (!acting.impersonation) await this.audit.record(transitionAudit(shipment, fromStatus));
     return this.toDetails(this.prisma.client, shipment);
   }
 

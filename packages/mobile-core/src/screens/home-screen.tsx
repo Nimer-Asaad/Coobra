@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMobileConfig } from '../config';
+import { useImpersonationGuard } from '../impersonation/use-guard';
 import { StyleSheet, View } from 'react-native';
 import { useSessionStore } from '../state/session-store';
 import { AppButton } from '../ui/button';
@@ -12,6 +13,7 @@ export function HomeScreen() {
   const { t } = useTranslation();
   const { clientApp } = useMobileConfig();
   const user = useSessionStore((state) => state.user);
+  const createBlocked = useImpersonationGuard().blockedReason('POST /v1/merchant/shipments');
   if (!user) return null;
 
   return (
@@ -22,6 +24,7 @@ export function HomeScreen() {
           <AppButton
             title={t('shipments.newShipment')}
             onPress={() => router.push('/shipments/new')}
+            disabledReason={createBlocked}
             testID="home-new-shipment"
           />
         ) : null}

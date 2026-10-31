@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
@@ -33,6 +34,13 @@ const apiEnv = env({
   DRIVER_APP_URL: URLS.driver,
   COOKIE_SECURE: 'false',
   MAIL_TRANSPORT: 'log',
+  // Everything the API needs is set here, so CI (which has no .env) runs the same stack.
+  MAIL_FROM: 'COOBRA E2E <e2e@coobra.test>',
+  // Impersonated writes are enabled only in this isolated stack (never in development): a
+  // random signing key per run, held only by this process and the API it starts.
+  IMPERSONATION_WRITES_ENABLED: 'true',
+  CONSEQUENCE_SIGNING_KEYS: `e2e:${randomBytes(32).toString('base64url')}`,
+  CONSEQUENCE_SIGNING_ACTIVE_KEY: 'e2e',
 });
 const expoApp = (app: 'merchant' | 'driver') => ({
   command:
@@ -40,7 +48,7 @@ const expoApp = (app: 'merchant' | 'driver') => ({
     ` && node packages/e2e/serve-web.mjs "${webDir(app)}" ${E2E_PORTS[app]}`,
   cwd: '../..',
   url: URLS[app],
-  env: env({ EXPO_PUBLIC_API_URL: URLS.api }),
+  env: env({ EXPO_PUBLIC_API_URL: URLS.api, EXPO_PUBLIC_ADMIN_WEB_URL: URLS.admin }),
   reuseExistingServer: false,
   timeout: 300_000,
 });
@@ -54,7 +62,13 @@ export default defineConfig({
   timeout: 240_000,
   expect: { timeout: 15_000 },
   reporter: [['list']],
-  use: { trace: 'retain-on-failure', screenshot: 'only-on-failure' },
+  use: {
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    // Optional: an installed browser (e.g. E2E_BROWSER_CHANNEL=chrome) instead of Playwright's own
+    // download; it still starts with a fresh, temporary profile.
+    ...(process.env.E2E_BROWSER_CHANNEL ? { channel: process.env.E2E_BROWSER_CHANNEL } : {}),
+  },
   webServer: [
     {
       command:
@@ -70,7 +84,12 @@ export default defineConfig({
       command: `pnpm --filter @coobra/admin-web exec next dev --port ${E2E_PORTS.admin}`,
       cwd: '../..',
       url: `${URLS.admin}/login`,
-      env: env({ API_URL: URLS.api, NEXT_DIST_DIR: '.next-e2e' }),
+      env: env({
+        API_URL: URLS.api,
+        NEXT_DIST_DIR: '.next-e2e',
+        MERCHANT_APP_URL: URLS.merchant,
+        DRIVER_APP_URL: URLS.driver,
+      }),
       reuseExistingServer: false,
       timeout: 240_000,
     },

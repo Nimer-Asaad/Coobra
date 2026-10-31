@@ -71,6 +71,11 @@ export const AUDIT_ACTIONS = [
   'RETURN_FEE_SET',
   'RETURN_FEE_WAIVED',
   'RETURN_CLOSED',
+  // Phase 4C (ADR 0003); written once impersonation is enabled.
+  'AUTH_REAUTHENTICATED',
+  'AUTH_REAUTHENTICATION_FAILED',
+  'IMPERSONATION_STARTED',
+  'IMPERSONATION_ENDED',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -81,6 +86,7 @@ export const AUDIT_CATEGORIES = [
   'PRICING',
   'FINANCE',
   'RETURNS',
+  'IMPERSONATION',
 ] as const;
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 
@@ -89,6 +95,7 @@ const PRICING_PREFIXES = ['ZONE_', 'PRICING_', 'MERCHANT_PICKUP_', 'PICKUP_ZONE_
 /** Accepts any string: entries written before an action was renamed still get a category. */
 export function auditCategory(action: string): AuditCategory {
   if (action.startsWith('AUTH_')) return 'AUTH';
+  if (action.startsWith('IMPERSONATION_')) return 'IMPERSONATION';
   if (action.startsWith('USER_')) return 'USERS';
   if (action.startsWith('RETURN_')) return 'RETURNS';
   if (action === 'SHIPMENT_FEE_OVERRIDDEN') return 'FINANCE';
@@ -122,6 +129,8 @@ export const AUDIT_ENTITY_KEYS = {
   PICKUP_ZONE_REQUEST: 'requestId',
   ZONE: 'zoneId',
   ZONE_KIND: 'zoneKindId',
+  // Before SESSION: impersonation events also name the admin session.
+  IMPERSONATION: 'impersonationId',
   SESSION: 'sessionId',
 } as const;
 export const AUDIT_ENTITY_TYPES = ['USER', ...Object.keys(AUDIT_ENTITY_KEYS)] as [
@@ -152,6 +161,8 @@ export const listAuditLogsQuerySchema = z
     targetUserId: optionalUuid,
     entityType: z.enum(AUDIT_ENTITY_TYPES, { error: 'validation.audit.entityType' }).optional(),
     entityId: optionalText.pipe(z.string().max(100).optional()),
+    /** Everything done in one impersonation, including its start and end (ADR 0003 §11.4). */
+    impersonationId: optionalUuid,
     /** Inclusive start and exclusive end (ISO date-time with offset). */
     from: optionalDate,
     to: optionalDate,
@@ -205,6 +216,12 @@ export interface AuditLogListItem {
   entity: AuditEntity | null;
   /** A short, safe hint for the table (tracking number, reference, reason). */
   summary: string | null;
+  /**
+   * Set when the actor (always the real person) acted as another account during an
+   * impersonation: "{actor} acting as {effectiveUser}" (ADR 0003 §11.4).
+   */
+  effectiveUser: AuditPerson | null;
+  impersonationId: string | null;
 }
 
 export interface AuditLogDetails extends AuditLogListItem {

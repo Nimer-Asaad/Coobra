@@ -159,6 +159,78 @@ describe('Authentication (PostgreSQL integration)', () => {
     );
   });
 
+  describe('per-account failed-login limit (shared by every API instance)', () => {
+    const login = (password: string, app: App = server(), email = merchant.email) =>
+      request(app).post('/v1/auth/login').send({ email, password, clientApp: 'MERCHANT_APP' });
+    const failures = (reason: string) =>
+      ctx.prisma.auditLog.count({
+        where: { action: 'AUTH_LOGIN_FAILED', metadata: { path: ['reason'], equals: reason } },
+      });
+    async function lockOut() {
+      for (let i = 0; i < 10; i += 1) await login(`wrong-password-${i}`).expect(401);
+    }
+
+    it('refuses even the right password after 10 wrong ones, exactly like a wrong password', async () => {
+      await register().expect(201);
+      await lockOut();
+      const locked = await login(merchant.password).expect(401);
+      const wrong = await login('wrong-password-x').expect(401);
+      const unknown = await login(merchant.password, server(), 'nobody@example.com').expect(401);
+      // Same answer for a locked account, a wrong password and an unknown email: no enumeration.
+      expect(locked.body).toEqual(unknown.body);
+      expect(wrong.body).toEqual(unknown.body);
+      expect(locked.body.code).toBe('AUTH_INVALID_CREDENTIALS');
+      expect(await failures('WRONG_PASSWORD')).toBe(10);
+      // Attempts while locked are recorded but do not extend the lock.
+      expect(await failures('LOCKED')).toBe(2);
+      expect(await ctx.prisma.session.count()).toBe(1); // only the registration session
+    });
+
+    it('evaluates at most 10 wrong passwords under concurrent attempts on two API instances', async () => {
+      await register().expect(201);
+      const second = await createTestApp();
+      try {
+        const apps = [server(), second.app.getHttpServer() as App];
+        const results = await Promise.all(
+          Array.from({ length: 24 }, (_, i) => login(`wrong-password-${i}`, apps[i % 2])),
+        );
+        expect(results.map((res) => res.status)).toEqual(Array(24).fill(401));
+        expect(await failures('WRONG_PASSWORD')).toBeLessThanOrEqual(10);
+        // Whatever the interleaving, the account locks at exactly 10, on either instance.
+        while ((await failures('WRONG_PASSWORD')) < 10) await login('wrong-password-y', apps[1]);
+        await login(merchant.password, apps[0]).expect(401);
+        await login(merchant.password, apps[1]).expect(401);
+        expect(await failures('WRONG_PASSWORD')).toBe(10);
+      } finally {
+        await second.app.close();
+      }
+    });
+
+    it('lets the owner back in after a password change or when the window has passed', async () => {
+      await register().expect(201);
+      await lockOut();
+      await login(merchant.password).expect(401);
+      // A password change (for example a reset) starts a new count.
+      await ctx.prisma.user.update({
+        where: { email: merchant.email },
+        data: { passwordChangedAt: new Date() },
+      });
+      await login(merchant.password).expect(200);
+
+      await lockOut();
+      await login(merchant.password).expect(401);
+      // 15 minutes later the old failures no longer count (moved back in the test database).
+      await ctx.prisma.$executeRaw`
+        UPDATE audit_logs SET created_at = created_at - interval '16 minutes'
+        WHERE action = 'AUTH_LOGIN_FAILED'`;
+      await ctx.prisma.user.update({
+        where: { email: merchant.email },
+        data: { passwordChangedAt: new Date(Date.now() - 20 * 60_000) },
+      });
+      await login(merchant.password).expect(200);
+    });
+  });
+
   it('blocks unverified accounts from protected routes and non-admins from admin routes', async () => {
     const { body } = await register().expect(201);
     const auth = { Authorization: `Bearer ${body.token}` };

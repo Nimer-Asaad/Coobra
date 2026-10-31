@@ -1,12 +1,16 @@
 import type { Request } from 'express';
 import type { Session } from '@coobra/database';
 import type { UserWithProfile } from '../users/user.mapper.js';
+import type { ActingContext } from './acting-context.js';
 
 export interface RequestAuth {
+  /** The account the session belongs to (the principal; see `acting`). */
   user: UserWithProfile;
   session: Session;
   /** How the session token reached the API. */
   transport: 'bearer' | 'cookie';
+  /** Real actor, effective principal and impersonation (ADR 0003 §2). */
+  acting: ActingContext;
 }
 
 export interface AppRequest extends Request {

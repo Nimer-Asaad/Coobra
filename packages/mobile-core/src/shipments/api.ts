@@ -1,5 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  ConsequencePreview,
+  CreateConsequencesQuery,
   CreateShipmentInput,
   MerchantPickupZoneState,
   Paginated,
@@ -92,6 +94,29 @@ export function useShipmentTransition(id: string) {
       void queryClient.invalidateQueries({ queryKey: ['shipments', clientApp, 'detail', id] });
     },
   });
+}
+
+/**
+ * R2 previews during an impersonation: the charges the API signs for the confirmation sheet.
+ * Always fetched fresh (never cached): the token is valid for five minutes only.
+ */
+export function useConsequencePreviews() {
+  const api = useApi();
+  const { basePath } = useShipmentScope();
+  return {
+    forCreate: (query: CreateConsequencesQuery) => {
+      const params = new URLSearchParams({
+        destinationZoneId: query.destinationZoneId,
+        codAmount: query.codAmount,
+      });
+      if (query.quoteId) params.set('quoteId', query.quoteId);
+      return api.request<ConsequencePreview>(`/v1/merchant/shipment-consequences?${params}`);
+    },
+    forTransition: (id: string, toStatus: ShipmentStatus) =>
+      api.request<ConsequencePreview>(
+        `${basePath}/${encodeURIComponent(id)}/consequences?toStatus=${toStatus}`,
+      ),
+  };
 }
 
 /** Active zones (destinations and pickup areas). Rarely changes, so cached for 10 minutes. */

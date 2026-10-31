@@ -22,6 +22,13 @@ import { AllowUnverifiedEmail, Auth, Meta, Public } from '../common/decorators.j
 import type { RequestAuth, RequestMeta } from '../common/request.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
+import { CLOCK, type Clock } from '../common/clock.js';
+import {
+  endImpersonationIn,
+  impersonationCookie,
+  loadImpersonationInfo,
+} from '../impersonation/impersonation-records.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { toAuthUser } from '../users/user.mapper.js';
 import { AuthService, type AuthResult } from './auth.service.js';
 
@@ -32,6 +39,8 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly prisma: PrismaService,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
   @Public()
@@ -67,6 +76,22 @@ export class AuthController {
     @Meta() meta: RequestMeta,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
+    const impersonation = auth.acting.impersonation;
+    if (impersonation) {
+      // Signing out of an impersonation ends it; the account's own sessions are untouched.
+      await this.prisma.client.$transaction((tx) =>
+        endImpersonationIn(tx, {
+          impersonationId: impersonation.id,
+          reason: 'MANUAL',
+          now: this.clock.now(),
+          endedById: auth.acting.actor.id,
+          meta,
+        }),
+      );
+      const cookie = impersonationCookie(this.config);
+      response.clearCookie(cookie.name, cookie.options);
+      return;
+    }
     await this.auth.logout(auth.user.id, auth.session.id, meta);
     if (auth.transport === 'cookie')
       response.clearCookie(SESSION_COOKIE_NAME, this.cookieOptions());
@@ -74,8 +99,17 @@ export class AuthController {
 
   @AllowUnverifiedEmail()
   @Get('me')
-  me(@Auth() auth: RequestAuth): MeResponse {
+  async me(@Auth() auth: RequestAuth): Promise<MeResponse> {
+    const impersonation = auth.acting.impersonation
+      ? await loadImpersonationInfo(
+          this.prisma.client,
+          auth.acting.impersonation.id,
+          this.clock.now(),
+          this.config,
+        )
+      : null;
     return {
+      ...(impersonation ? { impersonation } : {}),
       user: toAuthUser(auth.user),
       session: {
         id: auth.session.id,

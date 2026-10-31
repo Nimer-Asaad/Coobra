@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import { UsersPanel } from '@/components/dashboard/users-panel';
 import { Alert } from '@/components/ui/alert';
 import { getCurrentSession } from '@/lib/api-server';
+import { impersonationAppUrls } from '@/lib/app-urls';
 import { getServerT } from '@/lib/i18n-server';
 
 export default async function UsersPage() {
@@ -14,7 +15,7 @@ export default async function UsersPage() {
   }
   return (
     <Suspense>
-      <UsersPanel />
+      <UsersPanel currentUserId={session.user.id} appUrls={impersonationAppUrls()} />
     </Suspense>
   );
 }

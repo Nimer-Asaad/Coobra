@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
 import { SUPPORTED_LANGUAGES, zoneOptions } from '@coobra/shared';
 import { useMobileConfig } from '../config';
+import { useImpersonationGuard } from '../impersonation/use-guard';
 import {
   usePickupZone,
   useRequestPickupZone,
@@ -26,6 +27,7 @@ export function SettingsScreen() {
   const changeLanguage = useChangeLanguage();
   const logout = useLogout();
   const { clientApp } = useMobileConfig();
+  const impersonating = useImpersonationGuard().active;
 
   return (
     <Screen>
@@ -50,7 +52,7 @@ export function SettingsScreen() {
         {email ? <AppText variant="muted">{email}</AppText> : null}
         <AppButton
           variant="outline"
-          title={t('auth.logout')}
+          title={impersonating ? t('impersonation.banner.end') : t('auth.logout')}
           onPress={() => logout.mutate()}
           loading={logout.isPending}
         />
@@ -74,6 +76,7 @@ function PickupZoneSetting() {
   const pickup = usePickupZone();
   const request = useRequestPickupZone();
   const withdraw = useWithdrawPickupZone();
+  const blocked = useImpersonationGuard().blockedReason('PUT /v1/merchant/pickup-zone');
   const options = zoneOptions(zones.data ?? [], language);
   const pathOf = (id: string | null | undefined) =>
     options.find((option) => option.id === id)?.path ?? t('pricing.pickupNone');
@@ -97,6 +100,7 @@ function PickupZoneSetting() {
             variant="link"
             title={t('pricing.pickupWithdraw')}
             loading={withdraw.isPending}
+            disabledReason={blocked}
             onPress={() => withdraw.mutate()}
           />
         </>
@@ -108,17 +112,21 @@ function PickupZoneSetting() {
           }`}
         />
       ) : null}
-      <ChoiceField
-        label={t('pricing.pickupRequestChange')}
-        placeholder={t('zones.choose')}
-        searchPlaceholder={t('zones.search')}
-        options={options
-          .filter((option) => option.active)
-          .map((option) => ({ value: option.id, label: option.path }))}
-        value={state?.pending?.requestedZoneId ?? ''}
-        onChange={(zoneId) => request.mutate(zoneId)}
-        testID="settings-pickup-zone"
-      />
+      {blocked ? (
+        <Banner tone="info" message={blocked} />
+      ) : (
+        <ChoiceField
+          label={t('pricing.pickupRequestChange')}
+          placeholder={t('zones.choose')}
+          searchPlaceholder={t('zones.search')}
+          options={options
+            .filter((option) => option.active)
+            .map((option) => ({ value: option.id, label: option.path }))}
+          value={state?.pending?.requestedZoneId ?? ''}
+          onChange={(zoneId) => request.mutate(zoneId)}
+          testID="settings-pickup-zone"
+        />
+      )}
       {request.isSuccess && state?.pending ? (
         <Banner tone="success" message={t('pricing.pickupRequested')} />
       ) : null}

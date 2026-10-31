@@ -1,3 +1,4 @@
+import type { ImpersonationInfo } from './impersonation.js';
 import type { Language } from './language.js';
 import type { CodStatus, ShipmentCodInfo } from './finance.js';
 import type { ReturnFeePolicy, ShipmentPricingInfo, ZoneLabel } from './pricing.js';
@@ -38,6 +39,8 @@ export interface LoginResponse {
 export interface MeResponse {
   user: AuthUser;
   session: SessionInfo;
+  /** Present only while a SUPER_ADMIN is acting as this account (Phase 4C). */
+  impersonation?: ImpersonationInfo;
 }
 
 export interface MessageResponse {

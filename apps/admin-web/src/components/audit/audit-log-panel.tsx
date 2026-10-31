@@ -33,6 +33,7 @@ const FILTER_KEYS = [
   'actorId',
   'entityType',
   'entityId',
+  'impersonationId',
   'from',
   'to',
 ] as const;
@@ -55,7 +56,15 @@ export function AuditLogPanel() {
   ) as Filters;
 
   const apiQuery = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  for (const key of ['q', 'category', 'action', 'actorId', 'entityType', 'entityId'] as const) {
+  for (const key of [
+    'q',
+    'category',
+    'action',
+    'actorId',
+    'entityType',
+    'entityId',
+    'impersonationId',
+  ] as const) {
     if (filters[key]) apiQuery.set(key, filters[key]);
   }
   if (filters.from) apiQuery.set('from', startOfLocalDay(filters.from));
@@ -196,6 +205,7 @@ export function AuditLogPanel() {
             </Field>
             {/* Set by clicking a person in the table; kept while other filters change. */}
             <input type="hidden" name="actorId" value={filters.actorId} />
+            <input type="hidden" name="impersonationId" value={filters.impersonationId} />
             <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-4">
               <Button type="submit">{t('audit.apply')}</Button>
               {actorName ? (
@@ -206,6 +216,16 @@ export function AuditLogPanel() {
                   onClick={() => navigate({ ...filters, actorId: '', page: '' })}
                 >
                   {t('audit.actorChip', { name: actorName })} ✕
+                </Button>
+              ) : null}
+              {filters.impersonationId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  aria-label={t('audit.removeImpersonation')}
+                  onClick={() => navigate({ ...filters, impersonationId: '', page: '' })}
+                >
+                  {t('audit.impersonationChip')} ✕
                 </Button>
               ) : null}
               {hasFilters ? (
@@ -303,6 +323,22 @@ export function AuditLogPanel() {
                               <div className="text-xs text-muted-foreground">
                                 {t(`roles.${entry.actor.role}`)}
                               </div>
+                            ) : null}
+                            {entry.effectiveUser && entry.impersonationId ? (
+                              <button
+                                type="button"
+                                className="text-start text-xs font-medium text-amber-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                                title={t('audit.filterByImpersonation')}
+                                onClick={() =>
+                                  navigate({
+                                    ...filters,
+                                    impersonationId: entry.impersonationId!,
+                                    page: '',
+                                  })
+                                }
+                              >
+                                {t('audit.actingAs', { name: entry.effectiveUser.fullName })}
+                              </button>
                             ) : null}
                           </td>
                           <td className="py-2.5 pe-3">{entry.targetUser?.fullName ?? '–'}</td>

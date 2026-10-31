@@ -61,56 +61,59 @@ model User {
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")
 
-  createdBy            User?                   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdUsers         User[]                  @relation("UserCreatedBy")
-  merchantProfile      MerchantProfile?
-  sessions             Session[]
-  authTokens           AuthToken[]
-  auditLogsAsActor     AuditLog[]              @relation("AuditActor")
-  auditLogsAsTarget    AuditLog[]              @relation("AuditTarget")
-  merchantShipments    Shipment[]              @relation("ShipmentMerchant")
-  createdShipments     Shipment[]              @relation("ShipmentCreator")
-  driverShipments      Shipment[]              @relation("ShipmentDriver")
-  statusChanges        ShipmentStatusHistory[] @relation("ShipmentHistoryActor")
-  historyAsDriver      ShipmentStatusHistory[] @relation("ShipmentHistoryDriver")
-  codCollections       CodCollection[]         @relation("CodCollectionDriver")
-  pricingRules         PricingRule[]           @relation("PricingRuleMerchant")
-  createdPricingRules  PricingRule[]           @relation("PricingRuleCreator")
-  pricingQuotes        PricingQuote[]          @relation("PricingQuoteMerchant")
-  feeOverrides         ShipmentFeeOverride[]   @relation("FeeOverrideActor")
-  approvedFeeOverrides ShipmentFeeOverride[]   @relation("FeeOverrideApprover")
-  financialAccounts    FinancialAccount[]      @relation("FinancialAccountOwner")
-  journalEntries       JournalEntry[]          @relation("JournalEntryCreator")
-  merchantShortfalls   CodShortfall[]          @relation("ShortfallMerchant")
-  driverShortfalls     CodShortfall[]          @relation("ShortfallDriver")
-  proposedShortfalls   CodShortfall[]          @relation("ShortfallProposer")
-  decidedShortfalls    CodShortfall[]          @relation("ShortfallDecider")
-  merchantAdjustments  FinancialAdjustment[]   @relation("AdjustmentMerchant")
-  requestedAdjustments FinancialAdjustment[]   @relation("AdjustmentRequester")
-  decidedAdjustments   FinancialAdjustment[]   @relation("AdjustmentDecider")
-  settingChanges       FinanceSettingChange[]  @relation("SettingChanger")
-  driverSettlements    DriverSettlement[]      @relation("SettlementDriver")
-  submittedSettlements DriverSettlement[]      @relation("SettlementSubmitter")
-  decidedSettlements   DriverSettlement[]      @relation("SettlementDecider")
-  driverShortages      DriverCashShortage[]    @relation("ShortageDriver")
-  proposedShortages    DriverCashShortage[]    @relation("ShortageProposer")
-  decidedShortages     DriverCashShortage[]    @relation("ShortageDecider")
-  driverRepayments     DriverRepayment[]       @relation("RepaymentDriver")
-  recordedRepayments   DriverRepayment[]       @relation("RepaymentRecorder")
-  merchantPayouts      MerchantPayout[]        @relation("PayoutMerchant")
-  createdPayouts       MerchantPayout[]        @relation("PayoutCreator")
-  approvedPayouts      MerchantPayout[]        @relation("PayoutApprover")
-  paidPayouts          MerchantPayout[]        @relation("PayoutPayer")
-  cancelledPayouts     MerchantPayout[]        @relation("PayoutCanceller")
-  merchantPayments     MerchantPayment[]       @relation("MerchantPaymentMerchant")
-  recordedPayments     MerchantPayment[]       @relation("MerchantPaymentRecorder")
-  treasuryTransfers    TreasuryTransfer[]      @relation("TransferRecorder")
-  requestedReturns     ReturnRecord[]          @relation("ReturnRequester")
-  approvedReturns      ReturnRecord[]          @relation("ReturnApprover")
-  returnTasks          ReturnRecord[]          @relation("ReturnDriver")
-  returnFeeDecisions   ReturnRecord[]          @relation("ReturnFeeSetter")
-  pickupZoneRequests   PickupZoneRequest[]     @relation("PickupRequestMerchant")
-  pickupZoneDecisions  PickupZoneRequest[]     @relation("PickupRequestDecider")
+  createdBy              User?                   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers           User[]                  @relation("UserCreatedBy")
+  merchantProfile        MerchantProfile?
+  sessions               Session[]
+  authTokens             AuthToken[]
+  auditLogsAsActor       AuditLog[]              @relation("AuditActor")
+  auditLogsAsTarget      AuditLog[]              @relation("AuditTarget")
+  merchantShipments      Shipment[]              @relation("ShipmentMerchant")
+  createdShipments       Shipment[]              @relation("ShipmentCreator")
+  driverShipments        Shipment[]              @relation("ShipmentDriver")
+  statusChanges          ShipmentStatusHistory[] @relation("ShipmentHistoryActor")
+  historyAsDriver        ShipmentStatusHistory[] @relation("ShipmentHistoryDriver")
+  codCollections         CodCollection[]         @relation("CodCollectionDriver")
+  pricingRules           PricingRule[]           @relation("PricingRuleMerchant")
+  createdPricingRules    PricingRule[]           @relation("PricingRuleCreator")
+  pricingQuotes          PricingQuote[]          @relation("PricingQuoteMerchant")
+  feeOverrides           ShipmentFeeOverride[]   @relation("FeeOverrideActor")
+  approvedFeeOverrides   ShipmentFeeOverride[]   @relation("FeeOverrideApprover")
+  financialAccounts      FinancialAccount[]      @relation("FinancialAccountOwner")
+  journalEntries         JournalEntry[]          @relation("JournalEntryCreator")
+  merchantShortfalls     CodShortfall[]          @relation("ShortfallMerchant")
+  driverShortfalls       CodShortfall[]          @relation("ShortfallDriver")
+  proposedShortfalls     CodShortfall[]          @relation("ShortfallProposer")
+  decidedShortfalls      CodShortfall[]          @relation("ShortfallDecider")
+  merchantAdjustments    FinancialAdjustment[]   @relation("AdjustmentMerchant")
+  requestedAdjustments   FinancialAdjustment[]   @relation("AdjustmentRequester")
+  decidedAdjustments     FinancialAdjustment[]   @relation("AdjustmentDecider")
+  settingChanges         FinanceSettingChange[]  @relation("SettingChanger")
+  driverSettlements      DriverSettlement[]      @relation("SettlementDriver")
+  submittedSettlements   DriverSettlement[]      @relation("SettlementSubmitter")
+  decidedSettlements     DriverSettlement[]      @relation("SettlementDecider")
+  driverShortages        DriverCashShortage[]    @relation("ShortageDriver")
+  proposedShortages      DriverCashShortage[]    @relation("ShortageProposer")
+  decidedShortages       DriverCashShortage[]    @relation("ShortageDecider")
+  driverRepayments       DriverRepayment[]       @relation("RepaymentDriver")
+  recordedRepayments     DriverRepayment[]       @relation("RepaymentRecorder")
+  merchantPayouts        MerchantPayout[]        @relation("PayoutMerchant")
+  createdPayouts         MerchantPayout[]        @relation("PayoutCreator")
+  approvedPayouts        MerchantPayout[]        @relation("PayoutApprover")
+  paidPayouts            MerchantPayout[]        @relation("PayoutPayer")
+  cancelledPayouts       MerchantPayout[]        @relation("PayoutCanceller")
+  merchantPayments       MerchantPayment[]       @relation("MerchantPaymentMerchant")
+  recordedPayments       MerchantPayment[]       @relation("MerchantPaymentRecorder")
+  treasuryTransfers      TreasuryTransfer[]      @relation("TransferRecorder")
+  requestedReturns       ReturnRecord[]          @relation("ReturnRequester")
+  approvedReturns        ReturnRecord[]          @relation("ReturnApprover")
+  returnTasks            ReturnRecord[]          @relation("ReturnDriver")
+  returnFeeDecisions     ReturnRecord[]          @relation("ReturnFeeSetter")
+  pickupZoneRequests     PickupZoneRequest[]     @relation("PickupRequestMerchant")
+  pickupZoneDecisions    PickupZoneRequest[]     @relation("PickupRequestDecider")
+  impersonationsAsActor  ImpersonationSession[]  @relation("ImpersonationActor")
+  impersonationsAsTarget ImpersonationSession[]  @relation("ImpersonationTarget")
+  notifications          NotificationOutbox[]    @relation("NotificationRecipient")
 
   @@index([role])
   @@map("users")
@@ -132,18 +135,25 @@ model MerchantProfile {
 
 /// Server-side session. Only the SHA-256 hash of the opaque session token is stored.
 model Session {
-  id         String    @id @default(uuid(7)) @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  tokenHash  String    @unique @map("token_hash")
-  clientApp  ClientApp @map("client_app")
-  ipAddress  String?   @map("ip_address")
-  userAgent  String?   @map("user_agent")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  lastUsedAt DateTime  @default(now()) @map("last_used_at")
-  expiresAt  DateTime  @map("expires_at")
-  revokedAt  DateTime? @map("revoked_at")
+  id                String    @id @default(uuid(7)) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  tokenHash         String    @unique @map("token_hash")
+  clientApp         ClientApp @map("client_app")
+  ipAddress         String?   @map("ip_address")
+  userAgent         String?   @map("user_agent")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  lastUsedAt        DateTime  @default(now()) @map("last_used_at")
+  expiresAt         DateTime  @map("expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+  /// Phase 4C: the last password re-entry on this admin session (step-up before impersonating).
+  reauthenticatedAt DateTime? @map("reauthenticated_at")
+  /// Phase 4C: set only on the temporary session an impersonation creates. `userId` is then the
+  /// impersonated account (the database checks it is that impersonation's target).
+  impersonationId   String?   @unique @map("impersonation_id") @db.Uuid
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonation         ImpersonationSession?  @relation("ImpersonationTemporarySession", fields: [impersonationId, userId], references: [id, targetUserId], onDelete: Restrict, onUpdate: Restrict)
+  startedImpersonations ImpersonationSession[] @relation("ImpersonationActorSession")
 
   @@index([userId])
   @@index([expiresAt])
@@ -170,17 +180,24 @@ model AuthToken {
 /// Append-only security audit trail (authentication events, account administration).
 /// Prepared for impersonation: `actorUserId` is always the real human who acted.
 model AuditLog {
-  id           String   @id @default(uuid(7)) @db.Uuid
-  action       String
-  actorUserId  String?  @map("actor_user_id") @db.Uuid
-  targetUserId String?  @map("target_user_id") @db.Uuid
-  ipAddress    String?  @map("ip_address")
-  userAgent    String?  @map("user_agent")
-  metadata     Json?
-  createdAt    DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid(7)) @db.Uuid
+  action          String
+  actorUserId     String?  @map("actor_user_id") @db.Uuid
+  targetUserId    String?  @map("target_user_id") @db.Uuid
+  ipAddress       String?  @map("ip_address")
+  userAgent       String?  @map("user_agent")
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+  /// Phase 4C: the impersonated account whose authority was used. NULL outside impersonation;
+  /// `actorUserId` is still the real human. Set together with `impersonationId` (CHECK).
+  effectiveUserId String?  @map("effective_user_id") @db.Uuid
+  impersonationId String?  @map("impersonation_id") @db.Uuid
 
-  actor  User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-  target User? @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  actor               User?                 @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  target              User?                 @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  /// Composite keys: the actor and the effective account must be that impersonation's own.
+  impersonationActor  ImpersonationSession? @relation("AuditImpersonationActor", fields: [impersonationId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  impersonationTarget ImpersonationSession? @relation("AuditImpersonationTarget", fields: [impersonationId, effectiveUserId], references: [id, targetUserId], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([actorUserId])
   @@index([targetUserId])
@@ -190,6 +207,9 @@ model AuditLog {
   @@index([actorUserId, createdAt(sort: Desc)])
   @@index([targetUserId, createdAt(sort: Desc)])
   @@index([metadata(ops: JsonbOps)], type: Gin)
+  // Phase 4C: everything done in one impersonation, and everything done as one account.
+  @@index([impersonationId, createdAt(sort: Desc)])
+  @@index([effectiveUserId, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
 
@@ -223,62 +243,68 @@ enum Currency {
 /// A parcel to deliver. Always owned by a merchant; creator and every status change are recorded.
 /// Money is stored as DECIMAL(12,2), never as floating point.
 model Shipment {
-  id                 String         @id @default(uuid(7)) @db.Uuid
+  id                     String         @id @default(uuid(7)) @db.Uuid
   /// Human-readable, unique tracking number (e.g. CB-48213907).
-  trackingNumber     String         @unique @map("tracking_number")
-  merchantId         String         @map("merchant_id") @db.Uuid
+  trackingNumber         String         @unique @map("tracking_number")
+  merchantId             String         @map("merchant_id") @db.Uuid
   /// The real user who created the shipment (the merchant, or a staff member on their behalf).
-  createdById        String?        @map("created_by_id") @db.Uuid
-  creatorRole        UserRole       @map("creator_role")
-  recipientName      String         @map("recipient_name")
+  createdById            String?        @map("created_by_id") @db.Uuid
+  creatorRole            UserRole       @map("creator_role")
+  recipientName          String         @map("recipient_name")
   /// Normalised: local (0599…) or E.164 (+970599…).
-  recipientPhone     String         @map("recipient_phone")
-  recipientPhoneAlt  String?        @map("recipient_phone_alt")
+  recipientPhone         String         @map("recipient_phone")
+  recipientPhoneAlt      String?        @map("recipient_phone_alt")
   /// Governorate code from @coobra/shared GOVERNORATES (validated by the API).
-  governorate        String
-  city               String
-  addressLine        String         @map("address_line")
-  landmark           String?
-  recipientNotes     String?        @map("recipient_notes")
-  merchantNotes      String?        @map("merchant_notes")
-  codAmount          Decimal        @map("cod_amount") @db.Decimal(12, 2)
+  governorate            String
+  city                   String
+  addressLine            String         @map("address_line")
+  landmark               String?
+  recipientNotes         String?        @map("recipient_notes")
+  merchantNotes          String?        @map("merchant_notes")
+  codAmount              Decimal        @map("cod_amount") @db.Decimal(12, 2)
   /// Null until priced (merchant-created shipments).
-  deliveryFee        Decimal?       @map("delivery_fee") @db.Decimal(12, 2)
-  currency           Currency       @default(ILS)
-  status             ShipmentStatus @default(CREATED)
-  driverId           String?        @map("driver_id") @db.Uuid
-  assignedAt         DateTime?      @map("assigned_at")
-  pickedUpAt         DateTime?      @map("picked_up_at")
-  deliveredAt        DateTime?      @map("delivered_at")
-  deliveredById      String?        @map("delivered_by_id") @db.Uuid
-  deliveryAttempts   Int            @default(0) @map("delivery_attempts")
-  failureReason      String?        @map("failure_reason")
-  cancellationReason String?        @map("cancellation_reason")
-  returnReason       String?        @map("return_reason")
+  deliveryFee            Decimal?       @map("delivery_fee") @db.Decimal(12, 2)
+  currency               Currency       @default(ILS)
+  status                 ShipmentStatus @default(CREATED)
+  driverId               String?        @map("driver_id") @db.Uuid
+  assignedAt             DateTime?      @map("assigned_at")
+  pickedUpAt             DateTime?      @map("picked_up_at")
+  deliveredAt            DateTime?      @map("delivered_at")
+  deliveredById          String?        @map("delivered_by_id") @db.Uuid
+  deliveryAttempts       Int            @default(0) @map("delivery_attempts")
+  failureReason          String?        @map("failure_reason")
+  cancellationReason     String?        @map("cancellation_reason")
+  returnReason           String?        @map("return_reason")
   /// Phase 3: cash-on-delivery progress (separate from the delivery status).
-  codStatus          CodStatus      @default(PENDING) @map("cod_status")
-  codCollectedAmount Decimal        @default(0) @map("cod_collected_amount") @db.Decimal(12, 2)
+  codStatus              CodStatus      @default(PENDING) @map("cod_status")
+  codCollectedAmount     Decimal        @default(0) @map("cod_collected_amount") @db.Decimal(12, 2)
   /// Phase 3: pricing zones (nullable for Phase 2 shipments).
-  originZoneId       String?        @map("origin_zone_id") @db.Uuid
-  destinationZoneId  String?        @map("destination_zone_id") @db.Uuid
+  originZoneId           String?        @map("origin_zone_id") @db.Uuid
+  destinationZoneId      String?        @map("destination_zone_id") @db.Uuid
   /// Optimistic concurrency token, incremented on every change.
-  version            Int            @default(0)
-  createdAt          DateTime       @default(now()) @map("created_at")
-  updatedAt          DateTime       @updatedAt @map("updated_at")
+  version                Int            @default(0)
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+  /// Phase 4C: set when the shipment was created during an impersonation. `createdById` is then
+  /// the real SUPER_ADMIN and `merchantId` the impersonated merchant (checked by composite keys).
+  createdImpersonationId String?        @map("created_impersonation_id") @db.Uuid
 
-  merchant        User                    @relation("ShipmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
-  createdBy       User?                   @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  driver          User?                   @relation("ShipmentDriver", fields: [driverId], references: [id], onDelete: Restrict)
-  history         ShipmentStatusHistory[]
-  codCollections  CodCollection[]
-  originZone      Zone?                   @relation("ShipmentOriginZone", fields: [originZoneId], references: [id], onDelete: Restrict)
-  destinationZone Zone?                   @relation("ShipmentDestinationZone", fields: [destinationZoneId], references: [id], onDelete: Restrict)
-  pricing         ShipmentPricing?
-  feeOverrides    ShipmentFeeOverride[]
-  pricingQuote    PricingQuote?
-  shortfall       CodShortfall?
-  returnRecord    ReturnRecord?
-  journalLines    JournalLine[]
+  merchant                   User                    @relation("ShipmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  createdBy                  User?                   @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdImpersonationActor  ImpersonationSession?   @relation("ShipmentImpersonationActor", fields: [createdImpersonationId, createdById], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  createdImpersonationTarget ImpersonationSession?   @relation("ShipmentImpersonationTarget", fields: [createdImpersonationId, merchantId], references: [id, targetUserId], onDelete: Restrict, onUpdate: Restrict)
+  driver                     User?                   @relation("ShipmentDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  history                    ShipmentStatusHistory[]
+  codCollections             CodCollection[]
+  originZone                 Zone?                   @relation("ShipmentOriginZone", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone            Zone?                   @relation("ShipmentDestinationZone", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  pricing                    ShipmentPricing?
+  feeOverrides               ShipmentFeeOverride[]
+  pricingQuote               PricingQuote?
+  shortfall                  CodShortfall?
+  returnRecord               ReturnRecord?
+  journalLines               JournalLine[]
+  adjustmentSources          FinancialAdjustment[]   @relation("AdjustmentSourceShipment")
 
   @@index([merchantId, createdAt(sort: Desc)])
   @@index([driverId, status])
@@ -287,29 +313,36 @@ model Shipment {
   @@index([recipientPhone])
   @@index([createdAt(sort: Desc)])
   @@index([destinationZoneId])
+  @@index([createdImpersonationId])
   @@map("shipments")
 }
 
 /// Append-only record of every status change and (re)assignment.
 model ShipmentStatusHistory {
-  id          String          @id @default(uuid(7)) @db.Uuid
-  shipmentId  String          @map("shipment_id") @db.Uuid
-  fromStatus  ShipmentStatus? @map("from_status")
-  toStatus    ShipmentStatus  @map("to_status")
+  id              String          @id @default(uuid(7)) @db.Uuid
+  shipmentId      String          @map("shipment_id") @db.Uuid
+  fromStatus      ShipmentStatus? @map("from_status")
+  toStatus        ShipmentStatus  @map("to_status")
   /// The real human who acted (never an impersonated identity).
-  actorUserId String?         @map("actor_user_id") @db.Uuid
-  actorRole   UserRole        @map("actor_role")
+  actorUserId     String?         @map("actor_user_id") @db.Uuid
+  actorRole       UserRole        @map("actor_role")
   /// For assignment entries: the driver assigned.
-  driverId    String?         @map("driver_id") @db.Uuid
-  note        String?
-  createdAt   DateTime        @default(now()) @map("created_at")
+  driverId        String?         @map("driver_id") @db.Uuid
+  note            String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  /// Phase 4C: set when the change was made during an impersonation. `actorUserId`/`actorRole`
+  /// stay the real human; the impersonated account comes from the impersonation.
+  impersonationId String?         @map("impersonation_id") @db.Uuid
 
-  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  actor    User?    @relation("ShipmentHistoryActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-  driver   User?    @relation("ShipmentHistoryDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  shipment      Shipment              @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  actor         User?                 @relation("ShipmentHistoryActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  driver        User?                 @relation("ShipmentHistoryDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  /// Composite key: the recorded actor must be that impersonation's actor.
+  impersonation ImpersonationSession? @relation("HistoryImpersonation", fields: [impersonationId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([shipmentId, createdAt])
   @@index([actorUserId])
+  @@index([impersonationId])
   @@map("shipment_status_history")
 }
 
@@ -501,12 +534,18 @@ model PricingQuote {
   expiresAt         DateTime      @map("expires_at")
   usedAt            DateTime?     @map("used_at")
   shipmentId        String?       @unique @map("shipment_id") @db.Uuid
+  /// Phase 4C: set when the quote was requested during an impersonation. `createdById` is then
+  /// the real SUPER_ADMIN and `merchantId` the impersonated merchant (checked by composite keys).
+  impersonationId   String?       @map("impersonation_id") @db.Uuid
 
-  merchant User        @relation("PricingQuoteMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
-  rule     PricingRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
-  shipment Shipment?   @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  merchant            User                  @relation("PricingQuoteMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  rule                PricingRule           @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  shipment            Shipment?             @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  impersonationActor  ImpersonationSession? @relation("QuoteImpersonationActor", fields: [impersonationId, createdById], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  impersonationTarget ImpersonationSession? @relation("QuoteImpersonationTarget", fields: [impersonationId, merchantId], references: [id, targetUserId], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([merchantId, createdAt])
+  @@index([impersonationId])
   @@map("pricing_quotes")
 }
 
@@ -659,10 +698,11 @@ model JournalEntry {
   createdById  String?     @map("created_by_id") @db.Uuid
   createdAt    DateTime    @default(now()) @map("created_at")
 
-  createdBy  User?         @relation("JournalEntryCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  reversalOf JournalEntry? @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
-  reversedBy JournalEntry? @relation("JournalReversal")
-  lines      JournalLine[]
+  createdBy         User?                 @relation("JournalEntryCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reversalOf        JournalEntry?         @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy        JournalEntry?         @relation("JournalReversal")
+  lines             JournalLine[]
+  adjustmentSources FinancialAdjustment[] @relation("AdjustmentSourceEntry")
 
   @@unique([kind, sourceType, sourceId])
   @@index([createdAt])
@@ -750,25 +790,49 @@ enum AdjustmentType {
 }
 
 /// A requested manual merchant credit/debit. Posted only after a second person approves it.
-model FinancialAdjustment {
-  id             String         @id @default(uuid(7)) @db.Uuid
-  type           AdjustmentType
-  merchantId     String         @map("merchant_id") @db.Uuid
-  amount         Decimal        @db.Decimal(12, 2)
-  reason         String
-  status         ApprovalStatus @default(PENDING_APPROVAL)
-  requestedById  String         @map("requested_by_id") @db.Uuid
-  decidedById    String?        @map("decided_by_id") @db.Uuid
-  decidedAt      DateTime?      @map("decided_at")
-  decisionNote   String?        @map("decision_note")
-  journalEntryId String?        @unique @map("journal_entry_id") @db.Uuid
-  createdAt      DateTime       @default(now()) @map("created_at")
+/// Phase 4C: what a financial adjustment corrects (ADR 0003 §10.4).
+enum AdjustmentSourceType {
+  /// A delivery fee (shipment required; the posting optional).
+  SHIPMENT_FEE
+  /// A return fee or delivery charge (shipment required; the posting optional).
+  RETURN_CHARGE
+  /// A COD shortfall resolution (shipment required; the posting optional).
+  COD_SHORTFALL
+  /// Any posting on the merchant account, with or without a shipment (payouts, payments, ...).
+  JOURNAL_ENTRY
+  /// No verified provenance.
+  UNLINKED
+}
 
-  merchant    User  @relation("AdjustmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
-  requestedBy User  @relation("AdjustmentRequester", fields: [requestedById], references: [id], onDelete: Restrict)
-  decidedBy   User? @relation("AdjustmentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+model FinancialAdjustment {
+  id                   String               @id @default(uuid(7)) @db.Uuid
+  type                 AdjustmentType
+  merchantId           String               @map("merchant_id") @db.Uuid
+  amount               Decimal              @db.Decimal(12, 2)
+  reason               String
+  status               ApprovalStatus       @default(PENDING_APPROVAL)
+  requestedById        String               @map("requested_by_id") @db.Uuid
+  decidedById          String?              @map("decided_by_id") @db.Uuid
+  decidedAt            DateTime?            @map("decided_at")
+  decisionNote         String?              @map("decision_note")
+  journalEntryId       String?              @unique @map("journal_entry_id") @db.Uuid
+  createdAt            DateTime             @default(now()) @map("created_at")
+  /// Phase 4C (ADR 0003 §10.4): what the adjustment corrects. Fixed when it is requested and never
+  /// changed (trigger). UNLINKED (also every adjustment written before this column) means no
+  /// verified provenance, so approval needs a fully independent reviewer.
+  sourceType           AdjustmentSourceType @default(UNLINKED) @map("source_type")
+  sourceShipmentId     String?              @map("source_shipment_id") @db.Uuid
+  sourceJournalEntryId String?              @map("source_journal_entry_id") @db.Uuid
+
+  merchant           User          @relation("AdjustmentMerchant", fields: [merchantId], references: [id], onDelete: Restrict)
+  requestedBy        User          @relation("AdjustmentRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy          User?         @relation("AdjustmentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+  sourceShipment     Shipment?     @relation("AdjustmentSourceShipment", fields: [sourceShipmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourceJournalEntry JournalEntry? @relation("AdjustmentSourceEntry", fields: [sourceJournalEntryId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([status])
+  @@index([sourceShipmentId])
+  @@index([sourceJournalEntryId])
   @@map("financial_adjustments")
 }
 
@@ -1031,40 +1095,167 @@ enum ReturnFeeStatus {
 /// The return of a shipment to its merchant. Physical progress is the shipment status; this
 /// record holds the request, approval, return driver and the return fee decision.
 model ReturnRecord {
-  id               String          @id @default(uuid(7)) @db.Uuid
-  shipmentId       String          @unique @map("shipment_id") @db.Uuid
-  requestedById    String?         @map("requested_by_id") @db.Uuid
-  requestReason    String?         @map("request_reason")
-  requestedAt      DateTime        @default(now()) @map("requested_at")
-  approvedById     String?         @map("approved_by_id") @db.Uuid
-  approvedAt       DateTime?       @map("approved_at")
-  returnDriverId   String?         @map("return_driver_id") @db.Uuid
+  id                       String          @id @default(uuid(7)) @db.Uuid
+  shipmentId               String          @unique @map("shipment_id") @db.Uuid
+  requestedById            String?         @map("requested_by_id") @db.Uuid
+  requestReason            String?         @map("request_reason")
+  requestedAt              DateTime        @default(now()) @map("requested_at")
+  approvedById             String?         @map("approved_by_id") @db.Uuid
+  approvedAt               DateTime?       @map("approved_at")
+  returnDriverId           String?         @map("return_driver_id") @db.Uuid
   /// The delivery driver before the return was assigned (for the record).
-  originalDriverId String?         @map("original_driver_id") @db.Uuid
-  feeStatus        ReturnFeeStatus @map("fee_status")
+  originalDriverId         String?         @map("original_driver_id") @db.Uuid
+  feeStatus                ReturnFeeStatus @map("fee_status")
   /// The return fee itself (excludes `deliveryCharge`).
-  feeAmount        Decimal?        @map("fee_amount") @db.Decimal(12, 2)
+  feeAmount                Decimal?        @map("fee_amount") @db.Decimal(12, 2)
   /// Policy copied from the pricing snapshot when the return record is created.
-  feePolicy        ReturnFeePolicy @default(RETURN_ONLY) @map("fee_policy")
+  feePolicy                ReturnFeePolicy @default(RETURN_ONLY) @map("fee_policy")
   /// Delivery or failed-attempt fee charged with the return (0 for RETURN_ONLY), fixed when the
   /// record is created. Posted together with the return fee, or waived with it.
-  deliveryCharge   Decimal         @default(0) @map("delivery_charge") @db.Decimal(12, 2)
-  feeSetById       String?         @map("fee_set_by_id") @db.Uuid
-  feeSetAt         DateTime?       @map("fee_set_at")
-  feeReason        String?         @map("fee_reason")
-  journalEntryId   String?         @unique @map("journal_entry_id") @db.Uuid
-  completedAt      DateTime?       @map("completed_at")
-  closedAt         DateTime?       @map("closed_at")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @updatedAt @map("updated_at")
+  deliveryCharge           Decimal         @default(0) @map("delivery_charge") @db.Decimal(12, 2)
+  feeSetById               String?         @map("fee_set_by_id") @db.Uuid
+  feeSetAt                 DateTime?       @map("fee_set_at")
+  feeReason                String?         @map("fee_reason")
+  journalEntryId           String?         @unique @map("journal_entry_id") @db.Uuid
+  completedAt              DateTime?       @map("completed_at")
+  closedAt                 DateTime?       @map("closed_at")
+  createdAt                DateTime        @default(now()) @map("created_at")
+  updatedAt                DateTime        @updatedAt @map("updated_at")
+  /// Phase 4C: set when the return was requested during an impersonation (`requestedById` is
+  /// then the real SUPER_ADMIN, checked by a composite key).
+  requestedImpersonationId String?         @map("requested_impersonation_id") @db.Uuid
 
-  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  requestedBy  User?    @relation("ReturnRequester", fields: [requestedById], references: [id], onDelete: Restrict)
-  approvedBy   User?    @relation("ReturnApprover", fields: [approvedById], references: [id], onDelete: Restrict)
-  returnDriver User?    @relation("ReturnDriver", fields: [returnDriverId], references: [id], onDelete: Restrict)
-  feeSetBy     User?    @relation("ReturnFeeSetter", fields: [feeSetById], references: [id], onDelete: Restrict)
+  shipment               Shipment              @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  requestedBy            User?                 @relation("ReturnRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  requestedImpersonation ImpersonationSession? @relation("ReturnImpersonation", fields: [requestedImpersonationId, requestedById], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy             User?                 @relation("ReturnApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  returnDriver           User?                 @relation("ReturnDriver", fields: [returnDriverId], references: [id], onDelete: Restrict)
+  feeSetBy               User?                 @relation("ReturnFeeSetter", fields: [feeSetById], references: [id], onDelete: Restrict)
 
   @@index([feeStatus])
   @@index([closedAt])
+  @@index([requestedImpersonationId])
   @@map("return_records")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4C — SUPER_ADMIN impersonation (ADR 0003). Created by migration 14; not used by the
+// application until impersonation is enabled.
+// ---------------------------------------------------------------------------
+
+enum ImpersonationEndReason {
+  MANUAL
+  EXPIRED
+  ACTOR_LOGOUT
+  ACTOR_SESSION_ENDED
+  ACTOR_REVOKED
+  TARGET_REVOKED
+}
+
+/// One impersonation: a SUPER_ADMIN (actor) operating a MERCHANT or DRIVER account (target).
+/// Rows are never deleted; the database enforces (see migration 14 CHECK constraints):
+/// - at most one active impersonation per actor and per target (`active_*` slot columns),
+/// - the target role is MERCHANT or DRIVER and matches the client app,
+/// - never the actor themselves, and at most 30 minutes long.
+model ImpersonationSession {
+  id              String                  @id @default(uuid(7)) @db.Uuid
+  actorUserId     String                  @map("actor_user_id") @db.Uuid
+  /// The admin session the impersonation was started from (it ends with it).
+  actorSessionId  String                  @map("actor_session_id") @db.Uuid
+  targetUserId    String                  @map("target_user_id") @db.Uuid
+  targetRole      UserRole                @map("target_role")
+  clientApp       ClientApp               @map("client_app")
+  reason          String
+  ticketReference String?                 @map("ticket_reference")
+  /// Equal to `actorUserId` / `targetUserId` while active and NULL once ended. Unique, so two
+  /// active impersonations can never share an actor or a target.
+  activeActorId   String?                 @unique @map("active_actor_id") @db.Uuid
+  activeTargetId  String?                 @unique @map("active_target_id") @db.Uuid
+  startedAt       DateTime                @default(now()) @map("started_at")
+  /// `startedAt` + 30 minutes at most; never extended.
+  expiresAt       DateTime                @map("expires_at")
+  endedAt         DateTime?               @map("ended_at")
+  endedReason     ImpersonationEndReason? @map("ended_reason")
+  ipAddress       String?                 @map("ip_address")
+  userAgent       String?                 @map("user_agent")
+
+  actor                     User                       @relation("ImpersonationActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  target                    User                       @relation("ImpersonationTarget", fields: [targetUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actorSession              Session                    @relation("ImpersonationActorSession", fields: [actorSessionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  temporarySessions         Session[]                  @relation("ImpersonationTemporarySession")
+  exchangeCode              ImpersonationExchangeCode?
+  auditEntriesAsActor       AuditLog[]                 @relation("AuditImpersonationActor")
+  auditEntriesAsTarget      AuditLog[]                 @relation("AuditImpersonationTarget")
+  historyEntries            ShipmentStatusHistory[]    @relation("HistoryImpersonation")
+  createdShipmentsAsActor   Shipment[]                 @relation("ShipmentImpersonationActor")
+  createdShipmentsForTarget Shipment[]                 @relation("ShipmentImpersonationTarget")
+  returnRequests            ReturnRecord[]             @relation("ReturnImpersonation")
+  quotesAsActor             PricingQuote[]             @relation("QuoteImpersonationActor")
+  quotesForTarget           PricingQuote[]             @relation("QuoteImpersonationTarget")
+  notifications             NotificationOutbox[]
+
+  // Targets of the composite foreign keys that tie records to this impersonation's people.
+  @@unique([id, actorUserId])
+  @@unique([id, targetUserId])
+  @@index([actorUserId, startedAt(sort: Desc)])
+  @@index([targetUserId, startedAt(sort: Desc)])
+  @@index([actorSessionId])
+  @@index([endedAt, expiresAt])
+  @@map("impersonation_sessions")
+}
+
+/// Single-use code that hands an impersonation to the target app tab (valid 60 seconds).
+/// Only the SHA-256 hash of the code is stored, with the challenge of the tab's verifier.
+model ImpersonationExchangeCode {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  impersonationId String    @unique @map("impersonation_id") @db.Uuid
+  codeHash        String    @unique @map("code_hash")
+  /// base64url SHA-256 of the verifier held only in memory by the opened app tab.
+  codeChallenge   String    @map("code_challenge")
+  expiresAt       DateTime  @map("expires_at")
+  usedAt          DateTime? @map("used_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  impersonation ImpersonationSession @relation(fields: [impersonationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("impersonation_exchange_codes")
+}
+
+enum NotificationKind {
+  IMPERSONATION_SUMMARY
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Durable outbox for emails that must not block or be lost (written in the same transaction as
+/// the event). Holds references only; the message is rendered when it is sent.
+model NotificationOutbox {
+  id              String             @id @default(uuid(7)) @db.Uuid
+  kind            NotificationKind
+  /// One notification per business event, e.g. `impersonation-summary:<impersonation id>`.
+  dedupeKey       String             @unique @map("dedupe_key")
+  recipientUserId String             @map("recipient_user_id") @db.Uuid
+  impersonationId String?            @map("impersonation_id") @db.Uuid
+  status          NotificationStatus @default(PENDING)
+  attempts        Int                @default(0)
+  nextAttemptAt   DateTime           @default(now()) @map("next_attempt_at")
+  /// Fencing token of the sender that claimed the row; only that sender may complete it.
+  leaseToken      String?            @map("lease_token") @db.Uuid
+  leaseExpiresAt  DateTime?          @map("lease_expires_at")
+  /// Short error text from the last failed attempt (never message content).
+  lastError       String?            @map("last_error")
+  sentAt          DateTime?          @map("sent_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  recipient     User                  @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  impersonation ImpersonationSession? @relation(fields: [impersonationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([status, nextAttemptAt])
+  @@index([impersonationId])
+  @@map("notification_outbox")
 }

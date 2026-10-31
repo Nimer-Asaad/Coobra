@@ -8,6 +8,7 @@ import {
   type JournalKind,
 } from '@coobra/database';
 import { isUniqueViolation } from '../auth/auth.service.js';
+import { currentActingContext } from '../common/acting-context.js';
 import { Errors } from '../common/app-exception.js';
 
 type Tx = Prisma.TransactionClient;
@@ -162,6 +163,9 @@ export class LedgerService {
   }
 
   async post(tx: Tx, posting: Posting) {
+    // ADR 0003 §6: nothing is ever posted while a SUPER_ADMIN acts as another account, whatever
+    // route or service asked for it. (Outside a request, e.g. the CLI backfill, there is no context.)
+    if (currentActingContext()?.impersonation) throw Errors.impersonationForbiddenAction();
     const lines = posting.lines.map((line) => ({ ...line, amount: decimal(line.amount) }));
     if (lines.length < 2) throw new Error('A journal entry needs at least two lines');
     if (lines.some((line) => !line.amount.greaterThan(0) || line.amount.decimalPlaces() > 2)) {

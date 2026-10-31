@@ -47,6 +47,13 @@ export function useFinanceAction<TInput, TResult>(
       key.current = null;
       for (const queryKey of invalidate) void queryClient.invalidateQueries({ queryKey });
     },
+    // A refusal (403) or a changed record (409) means what is shown is out of date: reload it.
+    onError: (error) => {
+      const status = error instanceof ClientApiError ? error.body.statusCode : 0;
+      if (status === 403 || status === 409) {
+        for (const queryKey of invalidate) void queryClient.invalidateQueries({ queryKey });
+      }
+    },
   });
 }
 
@@ -81,6 +88,8 @@ export function InlineAction({
   children,
   submitLabel,
   successMessage,
+  disabled = false,
+  describedBy,
 }: {
   label: string;
   variant?: 'outline' | 'default' | 'destructive' | 'ghost';
@@ -91,6 +100,9 @@ export function InlineAction({
   submitLabel?: string;
   /** Shown after success; defaults to a generic "Saved." */
   successMessage?: string;
+  /** Known in advance to be refused; `describedBy` points at the explanation. */
+  disabled?: boolean;
+  describedBy?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -107,6 +119,8 @@ export function InlineAction({
         <Button
           size="sm"
           variant={variant}
+          disabled={disabled}
+          aria-describedby={describedBy}
           onClick={() => {
             setDone(false);
             setEdited(true);

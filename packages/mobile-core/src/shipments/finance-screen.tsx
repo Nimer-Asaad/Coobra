@@ -4,6 +4,7 @@ import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 
 import { PAYMENT_METHODS, type PaymentMethod } from '@coobra/shared';
 import { ApiError } from '../api-client';
 import { useMobileConfig } from '../config';
+import { useImpersonationGuard } from '../impersonation/use-guard';
 import { AppButton } from '../ui/button';
 import { Banner } from '../ui/banner';
 import { ErrorBanner } from '../ui/error-banner';
@@ -64,6 +65,11 @@ function MerchantFinance() {
   const request = useRequestPayout();
   const withdraw = useWithdrawPayout();
   const respond = useRespondShortfall();
+  // Financial consent is the merchant's own decision (ADR 0003): never during an impersonation.
+  const guard = useImpersonationGuard();
+  const respondBlocked = guard.blockedReason('POST /v1/merchant/finance/shortfalls/:id/accept');
+  const payoutBlocked = guard.blockedReason('POST /v1/merchant/finance/payouts');
+  const withdrawBlocked = guard.blockedReason('POST /v1/merchant/finance/payouts/:id/cancel');
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('BANK_TRANSFER');
 
@@ -108,13 +114,14 @@ function MerchantFinance() {
               <AppButton
                 title={t('finance.merchantView.accept')}
                 loading={respond.isPending}
+                disabledReason={respondBlocked}
                 onPress={() => respond.mutate({ id: item.id, accept: true })}
                 testID={`shortfall-accept-${item.id}`}
               />
               <AppButton
                 variant="outline"
                 title={t('finance.merchantView.decline')}
-                disabled={respond.isPending}
+                disabled={respond.isPending || Boolean(respondBlocked)}
                 onPress={() => respond.mutate({ id: item.id, accept: false })}
               />
             </View>
@@ -150,6 +157,7 @@ function MerchantFinance() {
           title={t('finance.merchantView.requestPayout')}
           loading={request.isPending}
           disabled={!amount.trim()}
+          disabledReason={payoutBlocked}
           onPress={() => request.mutate({ amount, method }, { onSuccess: () => setAmount('') })}
           testID="payout-submit"
         />
@@ -171,6 +179,7 @@ function MerchantFinance() {
               <AppButton
                 variant="link"
                 title={t('finance.merchantView.withdraw')}
+                disabledReason={withdrawBlocked}
                 onPress={() =>
                   withdraw.mutate(
                     { id: payout.id, note: 'Withdrawn by merchant' },
@@ -193,6 +202,10 @@ function DriverFinance() {
   const { language } = useDirection();
   const finance = useDriverFinance();
   const submit = useSubmitSettlement();
+  // Cash custody stays with the driver's own session (ADR 0003): never during an impersonation.
+  const settlementBlocked = useImpersonationGuard().blockedReason(
+    'POST /v1/driver/finance/settlements',
+  );
   const [amount, setAmount] = useState('');
 
   if (finance.isPending) return <ActivityIndicator color={colors.primary} style={styles.loading} />;
@@ -241,6 +254,7 @@ function DriverFinance() {
               title={t('finance.driverView.handOver')}
               loading={submit.isPending}
               disabled={!amount.trim()}
+              disabledReason={settlementBlocked}
               onPress={() =>
                 submit.mutate({ declaredAmount: amount }, { onSuccess: () => setAmount('') })
               }

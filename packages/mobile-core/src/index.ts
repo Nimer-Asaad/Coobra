@@ -16,3 +16,4 @@ export { ShipmentsListScreen } from './shipments/list-screen';
 export { CreateShipmentScreen } from './shipments/create-screen';
 export { ShipmentDetailsScreen } from './shipments/details-screen';
 export { FinanceScreen } from './shipments/finance-screen';
+export { ImpersonateScreen } from './impersonation/impersonate-screen';
